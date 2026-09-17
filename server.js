@@ -26,13 +26,15 @@ const DB_FILE = process.env.DB_FILE || path.join(__dirname, "db.json");
 //   BREVO_API_KEY       envia pela API HTTPS da Brevo (funciona no plano grátis do Render,
 //                       que bloqueia as portas SMTP 25/465/587)
 //   MAIL_FROM           ex.: ChessTable <seu-remetente-verificado@...>
+//   MAIL_WEBHOOK_URL    URL de um Google Apps Script que envia pelo seu Gmail (ver README)
 //   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS  (SMTP direto — só em planos pagos ou fora do Render)
 if (process.env.BASE_URL) CFG.baseUrl = process.env.BASE_URL;
 if (process.env.SMTP_HOST) CFG.smtp = { host: process.env.SMTP_HOST, port: +process.env.SMTP_PORT || 465,
   user: process.env.SMTP_USER, pass: process.env.SMTP_PASS, from: process.env.MAIL_FROM };
 const BREVO_KEY = process.env.BREVO_API_KEY || (CFG.brevo && CFG.brevo.apiKey) || "";
 const MAIL_FROM = process.env.MAIL_FROM || (CFG.smtp && CFG.smtp.from) || (CFG.brevo && CFG.brevo.from) || "";
-const DEV_MAIL = !BREVO_KEY && !(CFG.smtp && CFG.smtp.host); // sem e-mail configurado: modo demonstração (link aparece na tela)
+const MAIL_WEBHOOK = process.env.MAIL_WEBHOOK_URL || CFG.mailWebhook || "";
+const DEV_MAIL = !MAIL_WEBHOOK && !BREVO_KEY && !(CFG.smtp && CFG.smtp.host); // sem e-mail configurado: modo demonstração (link aparece na tela)
 
 /* ---------------- banco de dados ---------------- */
 let db = { users: {}, sessions: {} };
@@ -91,8 +93,30 @@ function sendMailBrevo(to, subject, text, cb) {
   req.on("error", (e) => cb(e));
   req.end(body);
 }
-function sendMail(to, subject, text, cb) {
+// Google Apps Script: POST /exec responde 302 para a URL com o resultado — seguimos com GET.
+function webhookReq(url, body, cb, hops) {
+  const u = new URL(url);
+  const lib = u.protocol === "http:" ? http : https;
+  const opt = { method: body ? "POST" : "GET", headers: {} };
+  if (body) { opt.headers["content-type"] = "application/json"; opt.headers["content-length"] = Buffer.byteLength(body); }
+  const req = lib.request(u, opt, (res) => {
+    let out = "";
+    res.on("data", (d) => out += d);
+    res.on("end", () => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && (hops || 0) < 3)
+        return webhookReq(new URL(res.headers.location, u).toString(), null, cb, (hops || 0) + 1);
+      let j = null; try { j = JSON.parse(out); } catch (e) {}
+      if (res.statusCode < 300 && j && j.ok) return cb(null, "sent");
+      cb(new Error("Webhook " + res.statusCode + " " + (j ? JSON.stringify(j) : out.slice(0, 120))));
+    });
+  });
+  req.setTimeout(20000, () => req.destroy(new Error("Webhook timeout")));
+  req.on("error", (e) => cb(e));
+  req.end(body || undefined);
+}
+function sendMail(to, subject, text, cb, meta) {
   if (DEV_MAIL) return cb(null, "dev");
+  if (MAIL_WEBHOOK) return webhookReq(MAIL_WEBHOOK, JSON.stringify({ to, nome: meta && meta.nome, link: meta && meta.link }), cb);
   if (BREVO_KEY) return sendMailBrevo(to, subject, text, cb);
   const S = CFG.smtp;
   const from = (S.from || S.user).match(/<([^>]+)>/) ? S.from.match(/<([^>]+)>/)[1] : (S.from || S.user);
@@ -204,10 +228,10 @@ const server = http.createServer((req, res) => {
       sendMail(email, "ChessTable — confirme sua conta",
         "Olá, " + nome + "!\r\n\r\nClique no link para confirmar sua conta no ChessTable:\r\n" + link + "\r\n\r\nSe você não criou esta conta, ignore este e-mail.",
         (err) => {
-          console.log("[registro]", nome, email, DEV_MAIL ? "(modo demo) " + link : (err ? "ERRO SMTP: " + err.message : "e-mail enviado"));
+          console.log("[registro]", nome, email, DEV_MAIL ? "(modo demo) " + link : (err ? "ERRO E-MAIL: " + err.message : "e-mail enviado"));
           if (err && !DEV_MAIL) return json(res, 500, { erro: "Falha ao enviar o e-mail. Tente de novo." });
           json(res, 200, { ok: true, demo: DEV_MAIL ? link : undefined });
-        });
+        }, { nome, link });
     });
   }
   if (p === "/api/entrar" && req.method === "POST") {
@@ -385,5 +409,5 @@ server.listen(PORT, () => {
   console.log("♞ ChessTable rodando em http://localhost:" + PORT);
   console.log(DEV_MAIL
     ? "✉️  SMTP não configurado: modo demonstração (o link de confirmação aparece na tela e no console)."
-    : "✉️  E-mail configurado (" + (BREVO_KEY ? "API Brevo" : "SMTP") + "): confirmações serão enviadas de verdade.");
+    : "✉️  E-mail configurado (" + (MAIL_WEBHOOK ? "Gmail via Apps Script" : BREVO_KEY ? "API Brevo" : "SMTP") + "): confirmações serão enviadas de verdade.");
 });
