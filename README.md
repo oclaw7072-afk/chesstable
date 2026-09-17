@@ -54,7 +54,12 @@ igual no Railway, Fly.io ou qualquer VPS):
 
 ### E-mails de verdade (link de confirmação)
 
-**No Render (plano grátis)** as portas SMTP são bloqueadas, então use a API HTTPS
+**Pelo seu Gmail (sem conta nova):** crie um projeto em script.google.com com o
+código de `apps-script/Codigo.gs`, implante como **App da Web** (executar como
+você, acesso: qualquer pessoa) e defina no Render `MAIL_WEBHOOK_URL` com a URL
+`.../exec`. Limite de ~100 e-mails/dia.
+
+**No Render (plano grátis)** as portas SMTP são bloqueadas; outra opção é a API HTTPS
 da Brevo (300 e-mails/dia grátis). Em **Environment** do serviço, defina:
 
 | Variável | Valor |
