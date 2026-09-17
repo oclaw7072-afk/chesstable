@@ -1,5 +1,5 @@
 /* ============================================================
-   Chesstable — servidor completo (ZERO dependências, só Node ≥ 16)
+   ChessTable — servidor completo (ZERO dependências, só Node ≥ 16)
    Contas com confirmação por e-mail · banco de dados JSON ·
    matchmaking · partidas validadas no servidor · rating Glicko
    Rodar:  node server.js        (porta: env PORT, padrão 3000)
@@ -10,17 +10,29 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const tls = require("tls");
+const https = require("https");
 const net = require("net");
 const E = require("./engine.js");
 
 /* ---------------- configuração ---------------- */
 // config.json (opcional): { "baseUrl": "https://chesstable.com",
-//   "smtp": { "host": "...", "port": 465, "user": "...", "pass": "...", "from": "Chesstable <no-reply@chesstable.com>" } }
+//   "smtp": { "host": "...", "port": 465, "user": "...", "pass": "...", "from": "ChessTable <no-reply@chesstable.com>" } }
 let CFG = {};
 try { CFG = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8")); } catch (e) {}
 const PORT = process.env.PORT || 3000;
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, "db.json");
-const DEV_MAIL = !(CFG.smtp && CFG.smtp.host); // sem SMTP: modo demonstração (link aparece na tela)
+// Variáveis de ambiente (recomendado no Render) têm prioridade sobre o config.json:
+//   BASE_URL            ex.: https://chesstable.onrender.com
+//   BREVO_API_KEY       envia pela API HTTPS da Brevo (funciona no plano grátis do Render,
+//                       que bloqueia as portas SMTP 25/465/587)
+//   MAIL_FROM           ex.: ChessTable <seu-remetente-verificado@...>
+//   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS  (SMTP direto — só em planos pagos ou fora do Render)
+if (process.env.BASE_URL) CFG.baseUrl = process.env.BASE_URL;
+if (process.env.SMTP_HOST) CFG.smtp = { host: process.env.SMTP_HOST, port: +process.env.SMTP_PORT || 465,
+  user: process.env.SMTP_USER, pass: process.env.SMTP_PASS, from: process.env.MAIL_FROM };
+const BREVO_KEY = process.env.BREVO_API_KEY || (CFG.brevo && CFG.brevo.apiKey) || "";
+const MAIL_FROM = process.env.MAIL_FROM || (CFG.smtp && CFG.smtp.from) || (CFG.brevo && CFG.brevo.from) || "";
+const DEV_MAIL = !BREVO_KEY && !(CFG.smtp && CFG.smtp.host); // sem e-mail configurado: modo demonstração (link aparece na tela)
 
 /* ---------------- banco de dados ---------------- */
 let db = { users: {}, sessions: {} };
@@ -63,8 +75,25 @@ function sessionUser(tok) {
 }
 
 /* ---------------- e-mail (SMTP mínimo, TLS) ---------------- */
+function sendMailBrevo(to, subject, text, cb) {
+  const m = MAIL_FROM.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+  const sender = m ? { name: m[1] || "ChessTable", email: m[2] } : { name: "ChessTable", email: MAIL_FROM.trim() };
+  const body = JSON.stringify({ sender, to: [{ email: to }], subject, textContent: text });
+  const req = https.request({ host: "api.brevo.com", path: "/v3/smtp/email", method: "POST",
+    headers: { "api-key": BREVO_KEY, "content-type": "application/json", "accept": "application/json",
+               "content-length": Buffer.byteLength(body) } }, (res) => {
+    let out = "";
+    res.on("data", (d) => out += d);
+    res.on("end", () => res.statusCode < 300 ? cb(null, "sent")
+      : cb(new Error("Brevo " + res.statusCode + " " + out.slice(0, 200))));
+  });
+  req.setTimeout(15000, () => req.destroy(new Error("Brevo timeout")));
+  req.on("error", (e) => cb(e));
+  req.end(body);
+}
 function sendMail(to, subject, text, cb) {
   if (DEV_MAIL) return cb(null, "dev");
+  if (BREVO_KEY) return sendMailBrevo(to, subject, text, cb);
   const S = CFG.smtp;
   const from = (S.from || S.user).match(/<([^>]+)>/) ? S.from.match(/<([^>]+)>/)[1] : (S.from || S.user);
   const lines = [];
@@ -134,7 +163,7 @@ function readBody(req, cb) {
 }
 function page(res, title, msg) {
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end("<!DOCTYPE html><html lang='pt-BR'><meta charset='utf-8'><body style=\"font-family:sans-serif;background:#191622;color:#eceaf4;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center\"><div><h1 style='color:#c9a84c'>♞ Chesstable</h1><h2>" + title + "</h2><p>" + msg + "</p><p><a href='/' style='color:#8b6ce8'>← Voltar ao jogo</a></p></div></body></html>");
+  res.end("<!DOCTYPE html><html lang='pt-BR'><meta charset='utf-8'><body style=\"font-family:sans-serif;background:#191622;color:#eceaf4;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center\"><div><h1 style='color:#c9a84c'>♞ ChessTable</h1><h2>" + title + "</h2><p>" + msg + "</p><p><a href='/' style='color:#8b6ce8'>← Voltar ao jogo</a></p></div></body></html>");
 }
 
 const server = http.createServer((req, res) => {
@@ -172,8 +201,8 @@ const server = http.createServer((req, res) => {
         rating: 1200, rd: 350, partidas: 0, vitorias: 0, derrotas: 0, empates: 0, criado: Date.now() };
       save();
       const link = baseUrl(req) + "/confirmar?t=" + vtoken;
-      sendMail(email, "Chesstable — confirme sua conta",
-        "Olá, " + nome + "!\r\n\r\nClique no link para confirmar sua conta no Chesstable:\r\n" + link + "\r\n\r\nSe você não criou esta conta, ignore este e-mail.",
+      sendMail(email, "ChessTable — confirme sua conta",
+        "Olá, " + nome + "!\r\n\r\nClique no link para confirmar sua conta no ChessTable:\r\n" + link + "\r\n\r\nSe você não criou esta conta, ignore este e-mail.",
         (err) => {
           console.log("[registro]", nome, email, DEV_MAIL ? "(modo demo) " + link : (err ? "ERRO SMTP: " + err.message : "e-mail enviado"));
           if (err && !DEV_MAIL) return json(res, 500, { erro: "Falha ao enviar o e-mail. Tente de novo." });
@@ -353,8 +382,8 @@ server.on("upgrade", (req, sock) => {
 });
 
 server.listen(PORT, () => {
-  console.log("♞ Chesstable rodando em http://localhost:" + PORT);
+  console.log("♞ ChessTable rodando em http://localhost:" + PORT);
   console.log(DEV_MAIL
     ? "✉️  SMTP não configurado: modo demonstração (o link de confirmação aparece na tela e no console)."
-    : "✉️  SMTP configurado: e-mails de confirmação serão enviados de verdade.");
+    : "✉️  E-mail configurado (" + (BREVO_KEY ? "API Brevo" : "SMTP") + "): confirmações serão enviadas de verdade.");
 });
