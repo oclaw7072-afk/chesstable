@@ -1,0 +1,2011 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chesstable — xadrez com cartas</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js"></script>
+<style>
+:root{
+  --bg1:#191622; --bg2:#232032; --panel:#2a2740; --panel2:#332f4d;
+  --ink:#eceaf4; --muted:#a49fc0; --accent:#c9a84c; --accent2:#8b6ce8;
+  --sq-l:#efdab5; --sq-d:#a97b52; --danger:#e5484d; --ok:#46c07a;
+}
+*{box-sizing:border-box; margin:0; padding:0}
+[hidden]{display:none !important}
+html,body{height:100%}
+body{
+  font-family:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+  background:radial-gradient(1200px 800px at 20% -10%, #2d2843 0%, var(--bg1) 55%), var(--bg1);
+  color:var(--ink); min-height:100vh; display:flex; flex-direction:column; align-items:center;
+}
+header{padding:18px 12px 6px; text-align:center}
+header h1{font-size:clamp(22px,3.4vw,34px); letter-spacing:.5px; font-weight:800}
+header h1 .gold{color:var(--accent)}
+header p{color:var(--muted); font-size:13px; margin-top:2px}
+
+/* ---------- menu ---------- */
+#menu{max-width:680px; width:100%; padding:24px 16px; display:flex; flex-direction:column; gap:14px; align-items:center}
+.menucard{background:var(--panel); border:1px solid #403b5e; border-radius:16px; padding:22px; width:100%; max-width:520px;
+  box-shadow:0 12px 40px rgba(0,0,0,.35)}
+.menucard h2{font-size:17px; margin-bottom:12px; color:var(--accent)}
+.bigbtn{display:block; width:100%; padding:14px; margin:8px 0; border:none; border-radius:12px; font-size:16px; font-weight:700;
+  cursor:pointer; background:linear-gradient(135deg,#8b6ce8,#6c4fd0); color:#fff; transition:transform .08s, filter .15s}
+.bigbtn:hover{filter:brightness(1.12)} .bigbtn:active{transform:scale(.98)}
+.bigbtn.ghost{background:var(--panel2); color:var(--ink); border:1px solid #4a4470}
+#hostPanel,#joinPanel{margin-top:10px; padding:14px; background:#221f35; border-radius:12px; border:1px dashed #4a4470}
+#hostCode{font-size:34px; font-weight:900; letter-spacing:8px; color:var(--accent); text-align:center; margin:8px 0; font-family:ui-monospace,monospace}
+.small{font-size:13px; color:var(--muted)}
+#joinCode{width:100%; padding:12px; font-size:20px; letter-spacing:6px; text-align:center; text-transform:uppercase;
+  background:#191627; color:var(--ink); border:1px solid #4a4470; border-radius:10px; margin:8px 0; font-family:ui-monospace,monospace}
+.row{display:flex; gap:8px}
+.row .bigbtn{margin:0}
+#hostStatus,#joinStatus{margin-top:8px; font-size:13px; color:var(--muted); min-height:18px}
+.txt{display:block; width:100%; padding:11px 12px; font-size:14px; background:#191627; color:var(--ink);
+  border:1px solid #4a4470; border-radius:10px; margin:6px 0}
+.tab{opacity:.55} .tab.on{opacity:1; border-color:var(--accent2)}
+.acctinfo{text-align:center; font-size:16px; font-weight:800; margin-bottom:10px}
+.acctinfo .rt{color:var(--accent)}
+.acctinfo .sub{display:block; font-size:12px; font-weight:400; color:var(--muted); margin-top:3px}
+#rankingBox table{width:100%; border-collapse:collapse; font-size:12.5px}
+#rankingBox td{padding:2.5px 4px; border-bottom:1px solid #353052}
+#rankingBox td.rt{text-align:right; color:var(--accent); font-weight:800}
+#acctMsg a{color:var(--accent2); font-weight:700}
+.rules{font-size:13px; color:var(--muted); line-height:1.55}
+.rules b{color:var(--ink)}
+
+/* ---------- jogo ---------- */
+#game{display:flex; gap:22px; padding:8px 16px 30px; flex-wrap:wrap; justify-content:center; align-items:flex-start; width:100%; max-width:1330px}
+#left{display:flex; flex-direction:column; align-items:center; gap:10px}
+#status{font-size:17px; font-weight:700; padding:10px 18px; background:var(--panel); border:1px solid #403b5e; border-radius:12px; min-width:280px; text-align:center}
+#status.chk{color:#ffb4b6; border-color:var(--danger)}
+#status.over{color:var(--accent)}
+#board{display:grid; grid-template-columns:repeat(8,minmax(42px,76px)); grid-template-rows:repeat(8,minmax(42px,76px));
+  border:6px solid #171422; border-radius:8px; box-shadow:0 18px 50px rgba(0,0,0,.5); user-select:none}
+.sq{position:relative; display:flex; align-items:center; justify-content:center; cursor:pointer; touch-action:none}
+.sq.light{background:var(--sq-l)} .sq.dark{background:var(--sq-d)}
+.pc{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:2}
+.psvg{width:88%; height:88%; filter:drop-shadow(0 2px 2px rgba(0,0,0,.35))}
+.rocksvg{width:78%; height:78%}
+.badges{position:absolute; top:1px; right:1px; display:flex; flex-direction:column; gap:2px; z-index:4}
+.badge{width:24px; height:24px; background:radial-gradient(circle at 35% 30%, #a88ef0, #6c4fd0);
+  border:2px solid #f6f3ff; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  box-shadow:0 2px 6px rgba(0,0,0,.55); font-size:13px; line-height:1}
+.badge svg{width:82%; height:82%; filter:drop-shadow(0 1px 1px rgba(0,0,0,.4))}
+.badge.shbadge{background:radial-gradient(circle at 35% 30%, #ff7a7e, #b8262b)}
+.badge.bmbadge{background:radial-gradient(circle at 35% 30%, #5c5c70, #1d1d27)}
+.badge.armorbadge{position:absolute; top:1px; left:1px; z-index:4;
+  background:radial-gradient(circle at 35% 30%, #ffc07a, #cf6a14); border-color:#fff0dc}
+@media (max-width:900px){
+  .badge{width:17px; height:17px; font-size:10px; border-width:1.5px}
+}
+.minesvg{width:52%; height:52%; opacity:.95; filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))}
+.boomfx{position:absolute; inset:0; z-index:6; pointer-events:none; border-radius:4px;
+  background:radial-gradient(circle, rgba(242,207,99,.95) 0%, rgba(240,144,60,.8) 45%, rgba(229,72,77,.0) 78%);
+  animation:boom .7s ease-out forwards}
+@keyframes boom{0%{opacity:0; transform:scale(.4)} 25%{opacity:1; transform:scale(1.15)} 100%{opacity:0; transform:scale(1)}}
+.sq.dragsrc .pc{opacity:.35}
+.sq.hover{outline:3px solid rgba(255,255,255,.8); outline-offset:-3px; z-index:5}
+#ghost{position:fixed; z-index:100; pointer-events:none; transform:translate(-50%,-55%); filter:drop-shadow(0 8px 14px rgba(0,0,0,.5))}
+#ghost .psvg{width:100%; height:100%}
+.ghostcard{background:linear-gradient(160deg,#3b3560,#2a2545); border:1.5px solid var(--accent2); border-radius:10px;
+  padding:8px 6px; text-align:center; color:var(--ink)}
+.ghostcard div{font-size:24px}
+.ghostcard span{font-size:10px; font-weight:800; color:var(--accent)}
+.coord{position:absolute; font-size:11px; font-weight:700; opacity:.75; pointer-events:none; z-index:1}
+.coord.rank{top:3px; left:4px}
+.coord.file{bottom:2px; right:5px}
+.sq.light .coord{color:#8a6238} .sq.dark .coord{color:#f3e2c5}
+.sq.last::before{content:""; position:absolute; inset:0; background:rgba(201,168,76,.38)}
+.sq.selected::before{content:""; position:absolute; inset:0; background:rgba(139,108,232,.5)}
+.sq.check::before{content:""; position:absolute; inset:0; background:radial-gradient(circle, rgba(229,72,77,.85) 0%, rgba(229,72,77,.25) 75%)}
+.sq.dest::after{content:""; position:absolute; width:26%; height:26%; border-radius:50%; background:rgba(30,26,46,.45); z-index:3}
+.sq.capture::after{content:""; position:absolute; inset:6%; border-radius:50%; border:4px solid rgba(229,72,77,.75); z-index:3}
+.sq.cardtarget::before{content:""; position:absolute; inset:0; background:rgba(139,108,232,.35); outline:2px solid rgba(139,108,232,.9); outline-offset:-2px}
+.sq.cardtarget.capture::after{border-color:rgba(139,108,232,.95)}
+
+/* ---------- painel lateral (layout do mockup) ---------- */
+#side{display:flex; flex-direction:column; gap:10px; width:530px; max-width:96vw}
+#roomInfo{background:var(--panel); border:1px solid #403b5e; border-radius:10px; padding:8px 14px; font-size:13px; color:var(--muted)}
+#roomInfo b{color:var(--accent); letter-spacing:3px; font-family:ui-monospace,monospace}
+.dot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-left:4px}
+.dot.on{background:var(--ok)} .dot.off{background:var(--danger)}
+.coins{color:var(--accent); font-weight:800}
+
+.handrow{background:var(--panel); border:1px solid #403b5e; border-radius:12px; padding:8px 10px}
+.handlabel{font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin-bottom:6px}
+.slots{display:flex; gap:7px; overflow-x:auto; padding-bottom:3px}
+.slots::-webkit-scrollbar{height:7px}
+.slots::-webkit-scrollbar-thumb{background:#4a4470; border-radius:4px}
+
+/* carta 9:16 */
+.card9{width:91px; aspect-ratio:9/16; flex:0 0 auto; position:relative; display:flex; flex-direction:column;
+  background:linear-gradient(160deg,#3b3560,#2a2545); border:1.5px solid #55498a; border-radius:9px; padding:4px 4px 3px;
+  text-align:center; transition:transform .1s, box-shadow .15s, filter .15s; touch-action:none; min-width:0}
+.card9.playable{cursor:grab}
+.card9.playable:hover{transform:translateY(-4px); box-shadow:0 8px 18px rgba(139,108,232,.35); border-color:var(--accent2)}
+.card9.active{outline:3px solid var(--accent2); transform:translateY(-4px); box-shadow:0 8px 20px rgba(139,108,232,.5)}
+.card9.poor{filter:saturate(.35) brightness(.68); cursor:not-allowed}
+.chead{display:flex; align-items:flex-start; gap:3px; margin-bottom:2px; min-height:24px}
+.cprice{flex:0 0 auto; font-size:9.5px; font-weight:900; color:var(--accent); background:#191627;
+  border:1.5px solid var(--accent); border-radius:4px; padding:1px 3.5px; line-height:1.2}
+.cprice.nofunds{color:#ff9598; border-color:var(--danger)}
+.cname{flex:1; font-size:8.6px; font-weight:800; text-transform:uppercase; color:var(--accent); line-height:1.15; letter-spacing:.2px}
+.cimg{border:1.5px solid #cfc8ea; border-radius:4px; background:#221f35; padding:1px; margin-bottom:3px}
+.cimg svg{display:block; width:100%; height:auto}
+.cdesc{font-size:7.4px; color:var(--muted); line-height:1.3; overflow:hidden; flex:1}
+.card9.facedown{background:repeating-linear-gradient(135deg,#332d55 0 7px,#2a2545 7px 14px);
+  display:flex; align-items:center; justify-content:center; font-size:34px; color:#8b6ce8}
+.slotempty{width:91px; aspect-ratio:9/16; flex:0 0 auto; border:2px dashed #4a4470; border-radius:9px; opacity:.45}
+
+/* linha do meio: ações | monte | tabela de lances */
+#midrow{display:grid; grid-template-columns:150px 100px 1fr; gap:10px; align-items:stretch}
+#actioncol{display:flex; flex-direction:column; gap:7px; justify-content:center}
+.oval{border:2px solid #55498a; border-radius:999px; background:var(--panel2); color:var(--ink);
+  font-weight:800; font-size:12.5px; padding:9px 6px; cursor:pointer; transition:filter .15s}
+.oval:hover{filter:brightness(1.18)}
+.oval.gold{background:linear-gradient(135deg,#c9a84c,#a3822e); color:#221c08; border-color:#c9a84c}
+#deckcol{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px}
+#deckpile{cursor:pointer}
+#deckpile.nodraw{cursor:not-allowed; filter:grayscale(.6) brightness(.7)}
+.deckcard{width:86px; aspect-ratio:9/16; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  font-size:34px; color:#8b6ce8; background:repeating-linear-gradient(135deg,#332d55 0 7px,#2a2545 7px 14px);
+  border:2px solid #55498a; border-radius:9px;
+  box-shadow:3px 3px 0 #221f35, 6px 6px 0 #1b1930, 0 8px 18px rgba(0,0,0,.45)}
+.deckcard span{font-size:15px; font-weight:900; color:var(--accent); background:rgba(20,16,32,.85); border-radius:8px; padding:1px 8px; margin-top:4px}
+#deckpile:not(.nodraw):hover .deckcard{transform:translateY(-3px)}
+.decklabel{font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:var(--muted)}
+#logwrap{display:flex; flex-direction:column; min-width:0}
+.loglabel{font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin-bottom:4px}
+#log{background:var(--panel); border:1px solid #403b5e; border-radius:12px; padding:8px 10px; flex:1; min-height:150px; max-height:190px; overflow-y:auto; font-size:12px}
+.logline{padding:1.5px 0; color:var(--ink)}
+.ln{color:var(--muted); font-family:ui-monospace,monospace}
+.lc.w{color:#fff} .lc.b{color:#9a92c2}
+
+/* ---------- overlay / toast ---------- */
+#overlay,#promoModal{position:fixed; inset:0; background:rgba(12,10,20,.75); display:flex; align-items:center; justify-content:center; z-index:50}
+#promoChoices{display:flex; gap:10px; justify-content:center}
+.promobtn{width:76px; height:76px; border-radius:14px; border:2px solid #55498a; background:linear-gradient(160deg,#3b3560,#2a2545);
+  cursor:pointer; display:flex; align-items:center; justify-content:center; transition:transform .1s, border-color .15s}
+.promobtn:hover{transform:translateY(-4px); border-color:var(--accent)}
+.promobtn svg{width:84%; height:84%}
+.ovbox{background:var(--panel); border:1px solid #55498a; border-radius:18px; padding:34px 44px; text-align:center; box-shadow:0 24px 80px rgba(0,0,0,.6)}
+.ovbox h2{font-size:30px; color:var(--accent); margin-bottom:8px}
+.ovbox p{color:var(--muted); margin-bottom:18px}
+.ovbox button{padding:11px 22px; margin:0 5px; border:none; border-radius:10px; font-weight:700; font-size:15px; cursor:pointer}
+#ovRestart{background:linear-gradient(135deg,#8b6ce8,#6c4fd0); color:#fff}
+#ovClose{background:var(--panel2); color:var(--ink); border:1px solid #4a4470}
+#toast{position:fixed; bottom:26px; left:50%; transform:translateX(-50%) translateY(20px); background:#151226; color:var(--ink);
+  border:1px solid var(--accent2); padding:11px 20px; border-radius:12px; font-size:14.5px; opacity:0; pointer-events:none;
+  transition:opacity .25s, transform .25s; z-index:60; box-shadow:0 10px 30px rgba(0,0,0,.5); max-width:90vw; text-align:center}
+#toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+
+@media (max-width:900px){
+  #game{flex-direction:column; align-items:center}
+  #side{width:min(92vw,560px)}
+  #board{grid-template-columns:repeat(8,minmax(38px,11.5vw)); grid-template-rows:repeat(8,minmax(38px,11.5vw))}
+}
+</style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+<symbol id="p-bB" viewBox="0 0 50 50"><path fill="#5f5955" stroke="#1e1e1e" stroke-linejoin="round" stroke-width="1.2" d="M25 5.77c-2.1 0-3.81.88-3.81 1.96l1.51 2.65C6.65 24.47 17 37.52 17 37.52h16s7.05-8.68.77-19.51l-3 4.82c-.66 1.09-1.96 1.5-2.9.91-.93-.57-1.14-1.91-.47-3l3.89-6.27a35.38 35.38 0 0 0-4-4.09l1.52-2.65c0-1.08-1.7-1.96-3.8-1.96z"/><path d="M25 5.77c-.82 0-1.57.13-2.2.36 4.35.84 4.99 1.12 2.57 4.35l3.24 3.56c-3.65 8.24-1.6 8-1.6 8s.7-2.65 4.11-7.77a35.7 35.7 0 0 0-3.82-3.89l1.51-2.65c0-1.08-1.7-1.96-3.81-1.96M33.77 18l-1.01 1.52c3.73 8.41-4.14 18-4.14 18H33c.16.03 6.96-8.85.77-19.52" opacity=".18"/><path fill="#fff" d="M15.14 31.72c-.22-.03-3.42-9.78 5.76-18.75-2.3 1.9-7.14 13.16-5.75 18.75zM23.3 10.2l-1.47-2.6s.24-.72 1.78-1.05c-1.73 1.35-1 1.67-.3 3.65z" opacity=".25"/><path fill="#5f5955" stroke="#1e1e1e" stroke-linejoin="round" stroke-width="1.2" d="M25 36.46s-9.13.04-11.7 1.62c-1.72 1.06-2.13 3.65-1.9 6.32h27.2c.23-2.67-.18-5.26-1.9-6.32C34.12 36.5 25 36.46 25 36.46z"/><path fill="#fff" d="M25 37.15S16.29 37 13.38 38.8c-.37.23-.7.84-.96 1.4.26-.34.5-.62.89-.86 2.56-1.56 11.69-1.6 11.69-1.6s9.13.04 11.7 1.61c.38.24.58.54.85.87a3 3 0 0 0-1.15-1.6C33.65 37.15 25 37.16 25 37.16z" opacity=".25"/></symbol>
+<symbol id="p-bK" viewBox="0 0 50 50"><path fill="#5f5955" stroke="#1e1e1e" stroke-linecap="round" stroke-width="1.2" d="M27.67 15.22v-3.54h4.44V7.25h-4.93V3.36H22.8v3.9h-4.93v4.42h4.44v3.55"/><rect width="9.4" height="2.79" x="20.3" y="14.21" fill="#5f5955" stroke="#1e1e1e" stroke-linejoin="round" stroke-width="1.2" ry="1.39"/><path d="M26.42 14.21c.72 0 1.3.63 1.3 1.4s-.58 1.4-1.3 1.4h1.97c.72 0 1.3-.63 1.3-1.4s-.58-1.4-1.3-1.4z" opacity=".18"/><path fill="#fff" d="M21.63 14.84c-.4 0-.72.35-.72.78 0 .42.32.77.72.77h.88c-.4 0-.73-.35-.73-.78 0-.42.32-.77.72-.77z" opacity=".25"/><path fill="#5f5955" stroke="#1e1e1e" stroke-linecap="round" stroke-width="1.2" d="M33.63 36.99s7.78-13.32 6.62-15.92c-1.17-2.6-8.48-4.5-15.25-4.5s-14.08 1.9-15.25 4.5c-1.16 2.6 6.61 15.92 6.61 15.92z"/><path d="M25 16.58c15.93 2.62 12.57 9.35 6.64 22.54l2.02-1.73s7.75-13.72 6.59-16.32c-1.55-2.83-7.5-4.16-15.25-4.5z" opacity=".18"/><path fill="#fff" d="M23.77 17.3c-3.9-.19-14.63 1.8-13.5 5.01.8 3.73 2.75 7.25 4.5 10.5-5.69-10.33-5.94-13.77 9-15.52zM23.39 4l-.02 3.3h.55l.02-3.3zm-4.93 3.87v3.2h.77v-3.2zm4.41 3.21.03 2.49h.52l-.03-2.49z" opacity=".25"/><path d="M26.19 3.36v3.9h.99v-3.9zm4.44 3.9v4.94h1.48V7.25zm-4.44 4.42v2.5h1.48v-2.5z" opacity=".18"/><path fill="#5f5955" stroke="#1e1e1e" stroke-linejoin="round" stroke-width="1.2" d="M25 36.46s-9.13.04-11.7 1.62c-1.72 1.06-2.13 3.65-1.9 6.32h27.2c.23-2.67-.18-5.26-1.9-6.32C34.12 36.5 25 36.46 25 36.46z"/><path fill="#fff" d="M25 37.15S16.29 37 13.38 38.8c-.37.23-.7.84-.96 1.4.26-.34.5-.62.89-.86C15.87 37.78 25 37.73 25 37.73s9.13.05 11.7 1.62c.38.24.58.54.85.87a3 3 0 0 0-1.15-1.6C33.65 37.15 25 37.16 25 37.16z" opacity=".25"/></symbol>
+<symbol id="p-bN" viewBox="-1.5 0 50 50"><path fill="#5f5955" stroke="#1e1e1e" stroke-linejoin="round" stroke-width="1.2" d="M25.192 23.015c-.1654 6.9672-11.758 5.2189-11.516 18.104l22.86.1184c-2.094-6.442 9.69-25.16-11.931-32.258v-.0001s-2.4381-2.601-5.9655-2.8237l.2227 3.5347-4.5583 4.5816c-2.6294 3.1455-8.7347 8.3784-7.7513 9.6111 3.1158 5.3041 6.3306 4.4316 6.3306 4.4316 4.2418-4.5433 5.8193-2.0894 12.309-5.2997z"/><path d="M19.32 14.694c-.7757.8609-.6902 1.1156-.8137 2.1503.8055.1232 1.5069.2398 2.2486.0656 2.3809-1.262.075-3.4026-1.4347-2.2162z" opacity=".4" paint-order="fill markers stroke"/><path d="M9.1916 22.166c-.8496.4078-.9984.9608-1.0565 1.4754.7288.4181 1.8765-.1255 2.0412-1.4316l-.9846-.044z" opacity=".35"/><path fill="#fff" d="M8.1905 25.15s.6525 1.1374-1.1019-1.641c.6594-1.9774 8.263-9.0796 12.438-13.534l-.1836-3.0857s1.0689 1.6901 1.2475 3.468c-4.3898 4.39-12.22 10.833-12.824 13.213.023.6738.24 1.0278.4231 1.5797z" opacity=".25"/><path d="M13.26 28.257c2.0291-3.3367 8.3914-3.2239 11.932-5.2424.3228.1024.1304 1.3697.2398 1.23.8476-1.0903 2.9259-3.279.8684-6.8743.5214 5.9575-13.718 5.5912-15.89 10.305-.2005.4355 2.1818.7932 2.85.5818z" opacity=".18"/><path fill="#fff" d="M25.8 23.781c-1.0131 5.8132-9.5449 6.1169-10.988 12.641 2.8332-6.4058 10.762-5.7136 10.988-12.641" opacity=".25"/><path d="M18.64 6.1556s3.051.738 4.9045 3.9825c20.499 7.1536 7.6413 27.937 5.7883 31.073l7.2034.026c-1.9871-3.2431 9.5482-25.597-11.931-32.258-1.7757-1.0691-2.7677-2.6092-5.9655-2.8238z" opacity=".18"/><path fill="#5f5955" stroke="#1e1e1e" stroke-linejoin="round" stroke-width="1.2" d="M25 36.457s-9.1309.048-11.691 1.6192c-1.7273 1.0602-2.1348 3.6514-1.8998 6.3237h27.182c.235-2.6723-.1725-5.2636-1.8999-6.3237-2.5597-1.5711-11.691-1.6192-11.691-1.6192z"/><path fill="#fff" d="M25 37.147s-8.7121-.1373-11.624 1.6658c-.3698.2291-.6992.8394-.9536 1.3902.2608-.3313.5022-.613.8867-.849 2.5598-1.5711 11.691-1.6191 11.691-1.6191s9.1318.048 11.692 1.6191c.391.24.5924.5316.8556.8701.026-.076-.4084-1.1578-1.1438-1.5962-2.7554-1.492-11.403-1.4808-11.403-1.4808z" opacity=".25"/></symbol>
+<symbol id="p-bP" viewBox="0 0 50 50"><path fill="#5f5955" stroke="#1e1e1e" stroke-linejoin="round" stroke-width="1.2" d="M21.503 27.594h6.994M19 17.508a6.35 6.35 0 0 0 1.966 4.587l-3.65 2.1.43 3.399h4.306c-.794 3.559-2.755 7.33-5.062 8.617s-5.3 3.097-4.843 8.189h25.706c.457-5.092-2.535-6.902-4.842-8.189-2.307-1.286-4.268-5.058-5.062-8.617h4.306l.43-3.4-3.65-2.099a6.352 6.352 0 0 0 1.966-4.587c0-3.367-2.628-5.912-6-5.912-3.373 0-6.002 2.545-6.001 5.912z"/><path d="M24.962 11.537c1.17-.459 9.527 5.906.647 10.773l4.512 2.1-.562 3.125h2.659l.428-3.399-3.65-2.1c1.253-1.2 1.962-2.58 1.964-4.312-.468-5.416-5.998-6.186-5.998-6.186zm-2.949 15.998c4.503 7.934 9.47 9.994 13.074 9.965l-2.115-1.347c-2.075-1.49-4.732-4.858-5.062-8.618z" opacity=".18"/><path fill="#fff" d="m21.983 22.213-1.647 2.347-2.356-.014 4.013-2.324zm2.324-9.946c-2.542.138-5.73 3.173-4.385 6.918l.199.643c-.33-3.489 2.127-7.116 4.186-7.561m-6.444 25.358c-3.984 2.305-5.117 6.14-5.117 6.14-.01 0-.548-4.175 3.956-6.654s4.822-6.15 5.86-8.893c-.636 3.704-.715 7.102-4.699 9.407" opacity=".25"/></symbol>
+<symbol id="p-bQ" viewBox="0 0 50 50"><path fill="#5f5955" stroke="#1e1e1e" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2" d="M24.959 5.094a2.958 3.316 90 0 0-3.316 2.958 2.958 3.316 90 0 0 3.316 2.959 2.958 3.316 90 0 0 3.316-2.959 2.958 3.316 90 0 0-3.316-2.958"/><path fill="#fff" d="M24.836 5.732c-.376-.21-3.724.806-2.185 3.576-.235-1.545.438-3.203 2.185-3.576" opacity=".25"/><path fill="#5f5955" stroke="#1e1e1e" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2" d="M24.959 11.011c-6.507 0-9.595 5.884-9.595 10.358h19.263c0-4.474-3.16-10.358-9.668-10.358"/><path fill="#fff" d="M18.161 14.977c1.042-1.478 2.92-3.22 6.84-3.38-.31.277-4.788 1.138-6.84 3.38" opacity=".25"/><path d="M24.836 5.007s.046.238 0 0c2.48 1.129 2.05 3.847.817 5.547 7.354 3.803 2.213 8.669 2.212 8.668h2.701c1.762 1.287 7.209-2.741-3.835-8.67 3.528-3.115.097-5.606-1.895-5.546z" opacity=".18"/><path fill="#5f5955" stroke="#1e1e1e" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2" d="M25 15.225c-1.971 0-2.348 2.65-4.137 2.86-1.82.213-3.381-2.312-5.25-1.737-1.495.46-.778 2.6-1.805 3.175-1.402.785-3.185-1.832-5.29-.298 6.838 8.829 8.085 12.377 7.983 18.819h16.998c-.103-6.443 1.144-9.99 7.983-18.82-2.106-1.533-3.889 1.084-5.29.3-1.027-.576-.311-2.716-1.806-3.176-1.868-.575-3.429 1.95-5.25 1.736-1.789-.21-2.166-2.86-4.137-2.86z"/><path fill="#fff" d="M9.895 19.34c-.136-.01-.331.056-.458.085 3.081 4.1 6.575 9.537 7.099 12.417-1.407-4.933-3.267-9.562-6.14-12.472z" opacity=".25"/><path d="M39.974 18.735c-9.485 10.003-9.924 17.985-16.941 19.31h10.476c-.103-6.443 1.145-9.99 7.983-18.819 0 0-.688-.756-1.518-.491" opacity=".18"/><path fill="#fff" d="M14.912 18.945c.203-.088 1.184-1.808 1.98-1.95-1.42-.346-1.618-.046-1.98 1.95m7.599-1.069c.953-.847 1.633-2.655 3.238-1.845-.798-.23-2.215 1.04-3.238 1.845m8.609.257c.21.07 2.176-1.642 2.862-1.218 0 0-1.43 1.12-2.862 1.218" opacity=".25"/><path fill="#5f5955" stroke="#1e1e1e" stroke-linejoin="round" stroke-width="1.2" d="M25 36.457s-9.13.048-11.691 1.62c-1.727 1.06-2.135 3.65-1.9 6.323h27.182c.235-2.672-.172-5.264-1.9-6.324-2.56-1.571-11.69-1.62-11.69-1.62z"/><path fill="#fff" d="M25 37.147s-8.712-.137-11.624 1.666c-.37.229-.7.84-.954 1.39.261-.331.502-.613.887-.849C15.869 37.783 25 37.734 25 37.734s9.132.049 11.692 1.62c.391.24.593.532.856.87.026-.076-.409-1.158-1.144-1.596C33.648 37.136 25 37.147 25 37.147" opacity=".25"/></symbol>
+<symbol id="p-bR" viewBox="0 0 50 50"><path fill="#5f5955" stroke="#1e1e1e" stroke-width="1.2" d="M17.93 20.41c4.9-.74 9.58-.57 14.14 0M14.18 9.66c-1.06 8.77 1.1 10.68 3.75 10.75l-3.31 18.16h20.76l-3.31-18.16c2.64-.07 4.8-1.98 3.75-10.75l-3.61-.53-1.07 3.65-3.15-.1-.52-3.76h-4.94L22 12.68l-3.15.1-1.07-3.65z"/><path d="M17.93 20.41c6.83 0 13.12.41 14.95 16.58l2.32.38-3.13-16.43c-.03-.3-6.09-1.82-14.14-.53" opacity=".18"/><path fill="#fff" d="m14.78 10.22 2.27-.29c-1.91.32-2.3 5.3-2.3 5.3-.25-.18-.2-4.9.03-5.01m10.5-.67c-1.65 0-2.52 2.75-2.52 2.75l.33-2.73zm7.4.27.92.11c-.78.5-1.59 2-1.59 2zm-14.2 11.14 2.61-.29c-2.62.3-4.9 13.05-4.9 13.11z" opacity=".25"/><path d="M34.01 9.4c.36 6.36-1.95 10.6-8.04 10.53l4.78.57c7.52.3 5.1-10.8 5.07-10.84z" opacity=".18"/><path fill="#5f5955" stroke="#1e1e1e" stroke-linejoin="round" stroke-width="1.2" d="M25 36.46s-9.13.04-11.7 1.62c-1.72 1.06-2.13 3.65-1.9 6.32h27.2c.23-2.67-.18-5.26-1.9-6.32C34.12 36.5 25 36.46 25 36.46z"/><path fill="#fff" d="M25 37.15S16.29 37 13.38 38.8c-.37.23-.7.84-.96 1.4.26-.34.5-.62.89-.86C15.87 37.78 25 37.73 25 37.73s9.13.05 11.7 1.62c.38.24.58.53.85.87a3 3 0 0 0-1.15-1.6C33.65 37.15 25 37.16 25 37.16z" opacity=".25"/></symbol>
+<symbol id="p-wB" viewBox="0 0 50 50"><path fill="#f0f0f0" stroke="#3c3c3c" stroke-linejoin="round" stroke-width="1.2" d="M25 5.77c-2.1 0-3.81.88-3.81 1.96l1.51 2.65C6.65 24.47 17 37.52 17 37.52h16s7.05-8.68.77-19.51l-3 4.82c-.66 1.09-1.96 1.5-2.9.91-.93-.57-1.14-1.91-.47-3l3.89-6.27a35.38 35.38 0 0 0-4-4.09l1.52-2.65c0-1.08-1.7-1.96-3.8-1.96z"/><path d="M25 5.77c-.82 0-1.57.13-2.2.36 4.35.84 4.99 1.12 2.57 4.35l3.24 3.56c-3.65 8.24-1.6 8-1.6 8s.7-2.65 4.11-7.77a35.7 35.7 0 0 0-3.82-3.89l1.51-2.65c0-1.08-1.7-1.96-3.81-1.96M33.77 18l-1.01 1.52c3.73 8.41-4.14 18-4.14 18H33c.16.03 6.96-8.85.77-19.52" opacity=".15"/><path fill="#fff" d="M15.14 31.72c-.22-.03-3.42-9.78 5.76-18.75-2.3 1.9-7.14 13.16-5.75 18.75zM23.3 10.2l-1.47-2.6s.24-.72 1.78-1.05c-1.73 1.35-1 1.67-.3 3.65z"/><path fill="#f0f0f0" stroke="#3c3c3c" stroke-linejoin="round" stroke-width="1.2" d="M25 36.46s-9.13.04-11.7 1.62c-1.72 1.06-2.13 3.65-1.9 6.32h27.2c.23-2.67-.18-5.26-1.9-6.32C34.12 36.5 25 36.46 25 36.46z"/><path fill="#fff" d="M25 37.15S16.29 37 13.38 38.8c-.37.23-.7.84-.96 1.4.26-.34.5-.62.89-.86 2.56-1.56 11.69-1.6 11.69-1.6s9.13.04 11.7 1.61c.38.24.58.54.85.87a3 3 0 0 0-1.15-1.6C33.65 37.15 25 37.16 25 37.16z"/></symbol>
+<symbol id="p-wK" viewBox="0 0 50 50"><path fill="#f0f0f0" stroke="#3c3c3c" stroke-linecap="round" stroke-width="1.2" d="M27.67 15.22v-3.54h4.44V7.25h-4.93V3.36H22.8v3.9h-4.93v4.42h4.44v3.55"/><rect width="9.4" height="2.79" x="20.3" y="14.21" fill="#f0f0f0" stroke="#3c3c3c" stroke-linejoin="round" stroke-width="1.2" ry="1.39"/><path d="M26.42 14.21c.72 0 1.3.63 1.3 1.4s-.58 1.4-1.3 1.4h1.97c.72 0 1.3-.63 1.3-1.4s-.58-1.4-1.3-1.4z" opacity=".15"/><path fill="#fff" d="M21.63 14.84c-.4 0-.72.35-.72.78 0 .42.32.77.72.77h.88c-.4 0-.73-.35-.73-.78 0-.42.32-.77.72-.77z"/><path fill="#f0f0f0" stroke="#3c3c3c" stroke-linecap="round" stroke-width="1.2" d="M33.63 36.99s7.78-13.32 6.62-15.92c-1.17-2.6-8.48-4.5-15.25-4.5s-14.08 1.9-15.25 4.5c-1.16 2.6 6.61 15.92 6.61 15.92z"/><path d="M25 16.58c15.93 2.62 12.57 9.35 6.64 22.54l2.02-1.73s7.75-13.72 6.59-16.32c-1.55-2.83-7.5-4.16-15.25-4.5z" opacity=".15"/><path fill="#fff" d="M23.77 17.3c-3.9-.19-14.63 1.8-13.5 5.01.8 3.73 2.75 7.25 4.5 10.5-5.69-10.33-5.94-13.77 9-15.52zM23.39 4l-.02 3.3h.55l.02-3.3zm-4.93 3.87v3.2h.77v-3.2zm4.41 3.21.03 2.49h.52l-.03-2.49z"/><path d="M26.19 3.36v3.9h.99v-3.9zm4.44 3.9v4.94h1.48V7.25zm-4.44 4.42v2.5h1.48v-2.5z" opacity=".15"/><path fill="#f0f0f0" stroke="#3c3c3c" stroke-linejoin="round" stroke-width="1.2" d="M25 36.46s-9.13.04-11.7 1.62c-1.72 1.06-2.13 3.65-1.9 6.32h27.2c.23-2.67-.18-5.26-1.9-6.32C34.12 36.5 25 36.46 25 36.46z"/><path fill="#fff" d="M25 37.15S16.29 37 13.38 38.8c-.37.23-.7.84-.96 1.4.26-.34.5-.62.89-.86C15.87 37.78 25 37.73 25 37.73s9.13.05 11.7 1.62c.38.24.58.54.85.87a3 3 0 0 0-1.15-1.6C33.65 37.15 25 37.16 25 37.16z"/></symbol>
+<symbol id="p-wN" viewBox="-1.5 0 50 50"><path fill="#f0f0f0" stroke="#3c3c3c" stroke-linejoin="round" stroke-width="1.2" d="M25.192 23.015c-.1654 6.9672-11.758 5.2189-11.516 18.104l22.86.1184c-2.094-6.442 9.69-25.16-11.931-32.258v-.0001s-2.4381-2.601-5.9655-2.8237l.2227 3.5347-4.5583 4.5816c-2.6294 3.1455-8.7347 8.3784-7.7513 9.6111 3.1158 5.3041 6.3306 4.4316 6.3306 4.4316 4.2418-4.5433 5.8193-2.0894 12.309-5.2997z"/><path d="M19.32 14.694c-.7757.8609-.6902 1.1156-.8137 2.1503.8055.1232 1.5069.2398 2.2486.0656 2.3809-1.262.075-3.4026-1.4347-2.2162z" opacity=".35" paint-order="fill markers stroke"/><path d="M9.1916 22.166c-.8496.4078-.9984.9608-1.0565 1.4754.7288.4181 1.8765-.1255 2.0412-1.4316l-.9846-.044z" opacity=".3"/><path fill="#fff" d="M8.1905 25.15s.6525 1.1374-1.1019-1.641c.6594-1.9774 8.263-9.0796 12.438-13.534l-.1836-3.0857s1.0689 1.6901 1.2475 3.468c-4.3898 4.39-12.22 10.833-12.824 13.213.023.6738.24 1.0278.4231 1.5797z"/><path d="M13.26 28.257c2.0291-3.3367 8.3914-3.2239 11.932-5.2424.3228.1024.1304 1.3697.2398 1.23.8476-1.0903 2.9259-3.279.8684-6.8743.5214 5.9575-13.718 5.5912-15.89 10.305-.2005.4355 2.1818.7932 2.85.5818z" opacity=".15"/><path fill="#fff" d="M25.8 23.781c-1.0131 5.8132-9.5449 6.1169-10.988 12.641 2.8332-6.4058 10.762-5.7136 10.988-12.641"/><path d="M18.64 6.1556s3.051.738 4.9045 3.9825c20.499 7.1536 7.6413 27.937 5.7883 31.073l7.2034.026c-1.9871-3.2431 9.5482-25.597-11.931-32.258-1.7757-1.0691-2.7677-2.6092-5.9655-2.8238z" opacity=".15"/><path fill="#f0f0f0" stroke="#3c3c3c" stroke-linejoin="round" stroke-width="1.2" d="M25 36.457s-9.1309.048-11.691 1.6192c-1.7273 1.0602-2.1348 3.6514-1.8998 6.3237h27.182c.235-2.6723-.1725-5.2636-1.8999-6.3237-2.5597-1.5711-11.691-1.6192-11.691-1.6192z"/><path fill="#fff" d="M25 37.147s-8.7121-.1373-11.624 1.6658c-.3698.2291-.6992.8394-.9536 1.3902.2608-.3313.5022-.613.8867-.849 2.5598-1.5711 11.691-1.6191 11.691-1.6191s9.1318.048 11.692 1.6191c.391.24.5924.5316.8556.8701.026-.076-.4084-1.1578-1.1438-1.5962-2.7554-1.492-11.403-1.4808-11.403-1.4808z"/></symbol>
+<symbol id="p-wP" viewBox="0 0 50 50"><path fill="#f0f0f0" stroke="#3c3c3c" stroke-linejoin="round" stroke-width="1.2" d="M21.503 27.594h6.994M19 17.508a6.35 6.35 0 0 0 1.966 4.587l-3.65 2.1.43 3.399h4.306c-.794 3.559-2.755 7.33-5.062 8.617s-5.3 3.097-4.843 8.189h25.706c.457-5.092-2.535-6.902-4.842-8.189-2.307-1.286-4.268-5.058-5.062-8.617h4.306l.43-3.4-3.65-2.099a6.352 6.352 0 0 0 1.966-4.587c0-3.367-2.628-5.912-6-5.912-3.373 0-6.002 2.545-6.001 5.912z"/><path d="M24.962 11.537c1.17-.459 9.527 5.906.647 10.773l4.512 2.1-.562 3.125h2.659l.428-3.399-3.65-2.1c1.253-1.2 1.962-2.58 1.964-4.312-.468-5.416-5.998-6.186-5.998-6.186zm-2.949 15.998c4.503 7.934 9.47 9.994 13.074 9.965l-2.115-1.347c-2.075-1.49-4.732-4.858-5.062-8.618z" opacity=".15"/><path fill="#fff" d="m21.983 22.213-1.647 2.347-2.356-.014 4.013-2.324zm2.324-9.946c-2.542.138-5.73 3.173-4.385 6.918l.199.643c-.33-3.489 2.127-7.116 4.186-7.561m-6.444 25.358c-3.984 2.305-5.117 6.14-5.117 6.14-.01 0-.548-4.175 3.956-6.654s4.822-6.15 5.86-8.893c-.636 3.704-.715 7.102-4.699 9.407"/></symbol>
+<symbol id="p-wQ" viewBox="0 0 50 50"><path fill="#f0f0f0" stroke="#3c3c3c" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2" d="M24.959 5.094a2.958 3.316 90 0 0-3.316 2.958 2.958 3.316 90 0 0 3.316 2.959 2.958 3.316 90 0 0 3.316-2.959 2.958 3.316 90 0 0-3.316-2.958"/><path fill="#fff" d="M24.836 5.732c-.376-.21-3.724.806-2.185 3.576-.235-1.545.438-3.203 2.185-3.576"/><path fill="#f0f0f0" stroke="#3c3c3c" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2" d="M24.959 11.011c-6.507 0-9.595 5.884-9.595 10.358h19.263c0-4.474-3.16-10.358-9.668-10.358"/><path fill="#fff" d="M18.161 14.977c1.042-1.478 2.92-3.22 6.84-3.38-.31.277-4.788 1.138-6.84 3.38"/><path d="M24.836 5.007s.046.238 0 0c2.48 1.129 2.05 3.847.817 5.547 7.354 3.803 2.213 8.669 2.212 8.668h2.701c1.762 1.287 7.209-2.741-3.835-8.67 3.528-3.115.097-5.606-1.895-5.546z" opacity=".15"/><path fill="#f0f0f0" stroke="#3c3c3c" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2" d="M25 15.225c-1.971 0-2.348 2.65-4.137 2.86-1.82.213-3.381-2.312-5.25-1.737-1.495.46-.778 2.6-1.805 3.175-1.402.785-3.185-1.832-5.29-.298 6.838 8.829 8.085 12.377 7.983 18.819h16.998c-.103-6.443 1.144-9.99 7.983-18.82-2.106-1.533-3.889 1.084-5.29.3-1.027-.576-.311-2.716-1.806-3.176-1.868-.575-3.429 1.95-5.25 1.736-1.789-.21-2.166-2.86-4.137-2.86z"/><path fill="#fff" d="M9.895 19.34c-.136-.01-.331.056-.458.085 3.081 4.1 6.575 9.537 7.099 12.417-1.407-4.933-3.267-9.562-6.14-12.472z"/><path d="M39.974 18.735c-9.485 10.003-9.924 17.985-16.941 19.31h10.476c-.103-6.443 1.145-9.99 7.983-18.819 0 0-.688-.756-1.518-.491" opacity=".15"/><path fill="#fff" d="M14.912 18.945c.203-.088 1.184-1.808 1.98-1.95-1.42-.346-1.618-.046-1.98 1.95m7.599-1.069c.953-.847 1.633-2.655 3.238-1.845-.798-.23-2.215 1.04-3.238 1.845m8.609.257c.21.07 2.176-1.642 2.862-1.218 0 0-1.43 1.12-2.862 1.218"/><path fill="#f0f0f0" stroke="#3c3c3c" stroke-linejoin="round" stroke-width="1.2" d="M25 36.457s-9.13.048-11.691 1.62c-1.727 1.06-2.135 3.65-1.9 6.323h27.182c.235-2.672-.172-5.264-1.9-6.324-2.56-1.571-11.69-1.62-11.69-1.62z"/><path fill="#fff" d="M25 37.147s-8.712-.137-11.624 1.666c-.37.229-.7.84-.954 1.39.261-.331.502-.613.887-.849C15.869 37.783 25 37.734 25 37.734s9.132.049 11.692 1.62c.391.24.593.532.856.87.026-.076-.409-1.158-1.144-1.596C33.648 37.136 25 37.147 25 37.147"/></symbol>
+<symbol id="p-wR" viewBox="0 0 50 50"><path fill="#f0f0f0" stroke="#3c3c3c" stroke-width="1.2" d="M17.93 20.41c4.9-.74 9.58-.57 14.14 0M14.18 9.66c-1.06 8.77 1.1 10.68 3.75 10.75l-3.31 18.16h20.76l-3.31-18.16c2.64-.07 4.8-1.98 3.75-10.75l-3.61-.53-1.07 3.65-3.15-.1-.52-3.76h-4.94L22 12.68l-3.15.1-1.07-3.65z"/><path d="M17.93 20.41c6.83 0 13.12.41 14.95 16.58l2.32.38-3.13-16.43c-.03-.3-6.09-1.82-14.14-.53" opacity=".15"/><path fill="#fff" d="m14.78 10.22 2.27-.29c-1.91.32-2.3 5.3-2.3 5.3-.25-.18-.2-4.9.03-5.01m10.5-.67c-1.65 0-2.52 2.75-2.52 2.75l.33-2.73zm7.4.27.92.11c-.78.5-1.59 2-1.59 2zm-14.2 11.14 2.61-.29c-2.62.3-4.89 13.11-4.89 13.11z"/><path d="M34.01 9.4c.36 6.36-1.95 10.6-8.04 10.53l4.78.57c7.52.3 5.1-10.8 5.07-10.84z" opacity=".15"/><path fill="#f0f0f0" stroke="#3c3c3c" stroke-linejoin="round" stroke-width="1.2" d="M25 36.46s-9.13.04-11.7 1.62c-1.72 1.06-2.13 3.65-1.9 6.32h27.2c.23-2.67-.18-5.26-1.9-6.32C34.12 36.5 25 36.46 25 36.46z"/><path fill="#fff" d="M25 37.15S16.29 37 13.38 38.8c-.37.23-.7.84-.96 1.4.26-.34.5-.62.89-.86C15.87 37.78 25 37.73 25 37.73s9.13.05 11.7 1.62c.38.24.58.53.85.87a3 3 0 0 0-1.15-1.6C33.65 37.15 25 37.16 25 37.16z"/></symbol>
+<symbol id="p-rock" viewBox="0 0 50 50"><g stroke="#3a3a42" stroke-width="1.6" stroke-linejoin="round"><path fill="#8d8d99" d="M10 38 L7 28 L13 17 L22 12 L33 13 L41 20 L44 30 L40 38 Z"/><path fill="#a8a8b4" d="M13 17 L22 12 L33 13 L30 22 L17 24 Z"/><path fill="#75757f" d="M30 22 L33 13 L41 20 L44 30 L36 28 Z"/><path fill="#9a9aa6" d="M7 28 L13 17 L17 24 L14 33 Z" /></g><ellipse cx="25" cy="40" rx="18" ry="3.4" fill="rgba(0,0,0,.25)"/></symbol>
+<symbol id="p-mine" viewBox="0 0 50 50"><g stroke="#15151b" stroke-width="1.4"><line x1="25" y1="4" x2="25" y2="46" stroke-width="2.4"/><line x1="4" y1="25" x2="46" y2="25" stroke-width="2.4"/><line x1="10" y1="10" x2="40" y2="40" stroke-width="2.4"/><line x1="40" y1="10" x2="10" y2="40" stroke-width="2.4"/><circle cx="25" cy="25" r="13.5" fill="#23232e"/><circle cx="20.5" cy="20.5" r="4" fill="#4a4a5c" stroke="none"/><circle cx="29" cy="23" r="2.6" fill="#e5484d" stroke="none"/></g></symbol>
+</svg>
+<div id="ghost" hidden></div>
+<header>
+  <h1>♞ Chess<span class="gold">Table</span></h1>
+  <p>Xadrez clássico + cartas especiais, moedas e explosões</p>
+</header>
+
+<div id="menu">
+  <div class="menucard" id="accountCard">
+    <h2>♞ Sua conta</h2>
+    <div id="acctLogged" hidden>
+      <div id="acctInfo" class="acctinfo"></div>
+      <button class="bigbtn" id="btnBuscar">🔎 Buscar partida (rankeada)</button>
+      <div id="queueStatus" class="small" style="text-align:center; min-height:18px"></div>
+      <button class="bigbtn ghost" id="btnLogout">Sair da conta</button>
+    </div>
+    <div id="acctForms">
+      <div class="row" style="margin-bottom:10px">
+        <button class="bigbtn ghost tab on" id="tabLogin">Entrar</button>
+        <button class="bigbtn ghost tab" id="tabReg">Criar conta</button>
+      </div>
+      <div id="formLogin">
+        <input class="txt" id="liNome" placeholder="nome de usuário" autocomplete="username">
+        <input class="txt" id="liSenha" type="password" placeholder="senha" autocomplete="current-password">
+        <button class="bigbtn" id="btnLogin">Entrar</button>
+      </div>
+      <div id="formReg" hidden>
+        <input class="txt" id="rgNome" placeholder="nome de usuário (3–16, letras/números/_)" maxlength="16">
+        <input class="txt" id="rgEmail" type="email" placeholder="seu e-mail">
+        <input class="txt" id="rgSenha" type="password" placeholder="senha (mín. 6)" autocomplete="new-password">
+        <button class="bigbtn" id="btnReg">Criar conta</button>
+      </div>
+      <div id="acctMsg" class="small" style="margin-top:8px; min-height:18px"></div>
+    </div>
+    <div id="rankingBox" class="small" style="margin-top:10px"></div>
+  </div>
+  <div class="menucard">
+    <h2>Jogar</h2>
+    <button class="bigbtn" id="btnHost">🌐 Criar sala online</button>
+    <button class="bigbtn" id="btnShowJoin">🔑 Entrar com código</button>
+    <button class="bigbtn ghost" id="btnLocal">💻 Dois jogadores no mesmo PC</button>
+    <button class="bigbtn ghost" id="btnTreino">🎓 Modo treino — todas as cartas, moedas infinitas</button>
+    <div id="hostPanel" hidden>
+      <div class="small">Envie este código para o seu oponente:</div>
+      <div id="hostCode">—</div>
+      <div class="row"><button class="bigbtn ghost" id="btnCopy">Copiar código</button></div>
+      <div id="hostStatus"></div>
+    </div>
+    <div id="joinPanel" hidden>
+      <div class="small">Digite o código que o seu oponente criou:</div>
+      <input id="joinCode" maxlength="5" placeholder="ABC12" autocomplete="off">
+      <div class="row"><button class="bigbtn" id="btnJoin">Conectar</button></div>
+      <div id="joinStatus"></div>
+    </div>
+  </div>
+  <div class="menucard">
+    <h2>As 17 cartas</h2>
+    <div class="rules">
+      <b>♞♝♜♛ Estilos (Cavalo, Bispo, Torre, Dama)</b> — a peça escolhida ganha para sempre aquele movimento além do próprio (marcada com um selo na casa). Não valem para o rei.<br><br>
+      <b>✨ Invocar (Cavalo, Bispo, Torre, Dama)</b> — cria a peça numa casa vazia da sua primeira fileira.<br><br>
+      <b>🪨 Pedra Ancestral</b> — pedra permanente numa casa vazia; ninguém ocupa nem atravessa.<br>
+      <b>🏹 Golpe à Distância</b> — captura uma peça inimiga no raio de ataque das suas, sem mover ninguém.<br>
+      <b>🔄 Mudança de Time</b> — peça inimiga no seu raio de ataque troca de lado (menos o rei).<br>
+      <b>💀 Sacrifício</b> — remove uma peça sua à sua escolha (menos o rei).<br>
+      <b>🎯 Bispo Atirador</b> — um bispo seu passa a capturar sem sair do lugar.<br>
+      <b>💣 Torre Bomba</b> — quando essa torre capturar — ou <b>for capturada</b> — explode a si e todas as casas vizinhas, e a explosão <b>pode matar reis</b>: ninguém pode causar uma explosão de bomba com o próprio rei no raio (capturar a bomba com seu rei do lado não salva do xeque!). Se ela puder capturar algo ao lado do rei inimigo, é <b>xeque</b>.<br>
+      <b>🛟 Seguro do Rei</b> — teletransporta seu rei para qualquer casa vazia.<br>
+      <b>💥 Mina Terrestre</b> — mina visível numa casa vazia: quem parar nela explode junto com os vizinhos, e ela <b>pode explodir reis</b>! Peças <b>não atravessam</b> a mina, ninguém pode detonar uma mina com o <b>próprio rei no raio</b> (nem o rei pode pisar nela), e um rei no alcance de uma mina detonável pelo inimigo está em <b>xeque</b>.<br>
+      <b>🛡️ Armadura de Espinhos</b> — a peça não pode ser capturada: quem tentar, morre e a armadura quebra (Golpe à Distância e Bispo Atirador quebram só a armadura). Atenção: uma <b>torre bomba morta nos espinhos ainda explode</b> — armadura numa peça vizinha do rei não desfaz o xeque da bomba! Não vale para o rei.<br><br>
+      <b>🪙 Moedas</b> — cada carta tem um custo (mostrado na carta; base: Invocar Cavalo = 27). Você começa com <b>50 moedas</b> e ganha <b>+5 a cada lance</b> seu. Sem moedas suficientes, a carta não pode ser jogada — nem para escapar de um xeque!<br>
+      <b>🎴 Mão e monte</b> — cada jogador recebe <b>3 cartas sorteadas</b> (sem repetição entre os dois) e as 11 restantes formam o <b>monte</b>. No seu turno você escolhe UMA ação: <b>mover uma peça</b>, <b>usar uma carta</b> ou <b>comprar 1 carta do monte</b> (grátis, mas só com menos de <b>5 cartas</b> na mão e fora de xeque; a carta comprada sai do monte para sempre). A mão do adversário fica <b>virada para baixo</b>. Há também os botões <b>🏳️ desistir</b> e <b>🤝 propor empate</b>. No <b>🎓 modo treino</b>, ambos têm todas as 17 cartas e moedas infinitas.<br><br>
+      Cada peça pode carregar <b>no máximo UM efeito</b> (estilo, atirador, bomba ou armadura) — se a armadura quebrar, a vaga fica livre de novo. Reis e pedras <b>sobrevivem a explosões</b> (mas minas e bombas <b>podem matar reis</b> — veja acima). Peão promovido <b>escolhe</b> entre dama, torre, bispo e cavalo. Usar uma carta <b>gasta o seu turno</b> e cada uma vale <b>uma vez</b> por partida. Você pode <b>clicar ou arrastar</b> peças e cartas; clicar de novo desseleciona. Só é xeque-mate se nem as cartas salvarem!
+    </div>
+  </div>
+</div>
+
+<div id="game" hidden>
+  <div id="left">
+    <div id="status"></div>
+    <div id="board"></div>
+  </div>
+  <div id="side">
+    <div id="roomInfo"></div>
+    <div class="handrow" id="handTop"></div>
+    <div id="midrow">
+      <div id="actioncol">
+        <button class="oval" id="btnResign">🏳️ Desistir</button>
+        <button class="oval" id="btnOfferDraw">🤝 Propor empate</button>
+        <button class="oval gold" id="btnRestart">↺ Nova partida</button>
+        <button class="oval" id="btnMenu">Menu</button>
+      </div>
+      <div id="deckcol">
+        <div id="deckpile" title="Monte de cartas — clique para comprar (grátis, gasta o turno)">
+          <div class="deckcard">🂠<span id="deckCount"></span></div>
+        </div>
+        <div class="decklabel">Monte</div>
+      </div>
+      <div id="logwrap">
+        <div class="loglabel">Tabela de lances</div>
+        <div id="log"></div>
+      </div>
+    </div>
+    <div class="handrow" id="handBottom"></div>
+  </div>
+</div>
+
+<div id="promoModal" hidden>
+  <div class="ovbox">
+    <h2>Promoção!</h2>
+    <p>Escolha a peça do seu peão:</p>
+    <div id="promoChoices"></div>
+  </div>
+</div>
+
+<div id="overlay" hidden>
+  <div class="ovbox">
+    <h2 id="ovTitle"></h2>
+    <p id="ovSub"></p>
+    <button id="ovRestart">Jogar de novo</button>
+    <button id="ovClose">Ver tabuleiro</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ============================================================
+   Xadrez com Cartas — Motor (lógica pura, sem DOM)
+   Peça:  {t:'P'|'N'|'B'|'R'|'Q'|'K', c:'w'|'b',
+           st?:{N,B,R,Q},  // estilos (movimentos extras permanentes)
+           sh?:1,          // bispo atirador
+           bm?:1,          // torre bomba
+           ar?:1}          // armadura de espinhos
+   Pedra: {t:'X'}   Minas: state.mines = [{at:[r,c], c}]
+   Tabuleiro: board[linha][coluna], linha 0 = 8ª fileira (pretas)
+   ============================================================ */
+"use strict";
+
+const PIECE_PT = { P: "Peão", N: "Cavalo", B: "Bispo", R: "Torre", Q: "Dama", K: "Rei" };
+
+const CARD_INFO = {
+  estiloN:    { nome: "Estilo Cavalo",     icone: "♞",  desc: "A peça escolhida ganha, para sempre, o movimento de cavalo além do seu próprio. Não vale para o rei.", hint: "Escolha a peça que vai ganhar o movimento de cavalo." },
+  estiloB:    { nome: "Estilo Bispo",      icone: "♝",  desc: "A peça escolhida ganha, para sempre, o movimento de bispo além do seu próprio. Não vale para o rei.", hint: "Escolha a peça que vai ganhar o movimento de bispo." },
+  estiloR:    { nome: "Estilo Torre",      icone: "♜",  desc: "A peça escolhida ganha, para sempre, o movimento de torre além do seu próprio. Não vale para o rei.", hint: "Escolha a peça que vai ganhar o movimento de torre." },
+  estiloQ:    { nome: "Estilo Dama",       icone: "♛",  desc: "A peça escolhida ganha, para sempre, o movimento de dama além do seu próprio. Não vale para o rei.", hint: "Escolha a peça que vai ganhar o movimento de dama." },
+  invocarN:   { nome: "Invocar Cavalo",    icone: "✨", desc: "Invoca um cavalo numa casa vazia da sua primeira fileira.", hint: "Escolha uma casa vazia da sua primeira fileira." },
+  invocarB:   { nome: "Invocar Bispo",     icone: "✨", desc: "Invoca um bispo numa casa vazia da sua primeira fileira.", hint: "Escolha uma casa vazia da sua primeira fileira." },
+  invocarR:   { nome: "Invocar Torre",     icone: "✨", desc: "Invoca uma torre numa casa vazia da sua primeira fileira.", hint: "Escolha uma casa vazia da sua primeira fileira." },
+  invocarQ:   { nome: "Invocar Dama",      icone: "✨", desc: "Invoca uma dama numa casa vazia da sua primeira fileira.", hint: "Escolha uma casa vazia da sua primeira fileira." },
+  rock:       { nome: "Pedra Ancestral",   icone: "🪨", desc: "Coloca uma pedra permanente numa casa vazia. Ninguém pode ocupá-la ou atravessá-la.", hint: "Escolha (ou arraste até) uma casa vazia para a pedra." },
+  sniper:     { nome: "Golpe à Distância", icone: "🏹", desc: "Captura uma peça inimiga que esteja no raio de ataque de uma peça sua, sem mover ninguém. (Contra armadura, quebra só a armadura.)", hint: "Escolha a peça inimiga para capturar à distância." },
+  mudanca:    { nome: "Mudança de Time",   icone: "🔄", desc: "Uma peça inimiga no raio de ataque das suas peças troca de lado e passa a ser sua. Não vale para o rei.", hint: "Escolha a peça inimiga que vai trocar de time." },
+  sacrificio: { nome: "Sacrifício",        icone: "💀", desc: "Sacrifica (remove do jogo) uma peça sua à sua escolha. O rei não pode ser sacrificado.", hint: "Escolha a peça sua que será sacrificada." },
+  atirador:   { nome: "Bispo Atirador",    icone: "🎯", desc: "Um bispo seu passa a capturar à distância: elimina o alvo sem sair do lugar. (Contra armadura, quebra só a armadura.)", hint: "Escolha o bispo que vai virar atirador." },
+  bomba:      { nome: "Torre Bomba",       icone: "💣", desc: "Uma torre sua vira bomba: quando capturar — ou FOR capturada — explode tudo em volta, e a explosão PODE matar reis! Ninguém pode causar essa explosão com o próprio rei no raio. Se ela puder capturar algo ao lado do rei inimigo, é xeque!", hint: "Escolha a torre que vai virar bomba." },
+  seguro:     { nome: "Seguro do Rei",     icone: "🛟", desc: "Teletransporta o seu rei para qualquer casa vazia do tabuleiro.", hint: "Escolha a casa para onde o rei vai se teletransportar." },
+  mina:       { nome: "Mina Terrestre",    icone: "💥", desc: "Mina visível numa casa vazia: quem parar sobre ela explode com os vizinhos — e ela PODE explodir reis! Ninguém detona uma mina com o próprio rei no raio; rei no alcance de mina detonável pelo inimigo está em xeque.", hint: "Escolha uma casa vazia para a mina." },
+  armadura:   { nome: "Armadura de Espinhos", icone: "🛡️", desc: "A peça escolhida não pode ser capturada: quem tentar capturá-la é destruído e a armadura quebra. Golpe à Distância e Bispo Atirador quebram só a armadura — e uma Torre Bomba morta nos espinhos ainda explode! Não vale para o rei.", hint: "Escolha a peça que vai receber a armadura." }
+};
+const CARD_KEYS = Object.keys(CARD_INFO);
+
+// Custos em moedas — base: Invocar Cavalo = 27 (≈ 9 moedas por "peão" de valor material).
+// Estilos custam menos que invocar (aprimoram uma peça que já pode ser perdida);
+// cartas de captura/roubo valem pelo alvo que podem pegar.
+const CARD_COST = {
+  estiloN: 22,  estiloB: 22,  estiloR: 36,  estiloQ: 63,
+  invocarN: 27, invocarB: 27, invocarR: 45, invocarQ: 81,
+  rock: 15,     sniper: 45,   mudanca: 60,  sacrificio: 5,
+  atirador: 40, bomba: 35,    seguro: 30,   mina: 20,
+  armadura: 25
+};
+const STYLE_OF = { estiloN: "N", estiloB: "B", estiloR: "R", estiloQ: "Q" };
+const SUMMON_OF = { invocarN: "N", invocarB: "B", invocarR: "R", invocarQ: "Q" };
+
+const KNIGHT_D = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
+const KING_D   = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+const ROOK_D   = [[-1,0],[1,0],[0,-1],[0,1]];
+const BISHOP_D = [[-1,-1],[-1,1],[1,-1],[1,1]];
+
+// variant: "padrao" (3 cartas sorteadas p/ cada jogador, sem repetição entre os dois,
+// 50 moedas iniciais) ou "treino" (todas as cartas, moedas infinitas)
+function initialState(variant) {
+  const board = Array.from({ length: 8 }, () => Array(8).fill(null));
+  const back = ["R","N","B","Q","K","B","N","R"];
+  for (let c = 0; c < 8; c++) {
+    board[0][c] = { t: back[c], c: "b" };
+    board[1][c] = { t: "P", c: "b" };
+    board[6][c] = { t: "P", c: "w" };
+    board[7][c] = { t: back[c], c: "w" };
+  }
+  const isTreino = variant === "treino";
+  const cardsW = {}, cardsB = {};
+  let drawPile = [];
+  if (isTreino) {
+    for (const k of CARD_KEYS) { cardsW[k] = 1; cardsB[k] = 1; }
+  } else {
+    const deck = CARD_KEYS.slice();
+    for (let i = deck.length - 1; i > 0; i--) { // Fisher–Yates
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = deck[i]; deck[i] = deck[j]; deck[j] = tmp;
+    }
+    for (let i = 0; i < 3; i++) { cardsW[deck[i]] = 1; cardsB[deck[3 + i]] = 1; }
+    drawPile = deck.slice(6); // as 11 restantes formam o monte de compra
+  }
+  return {
+    board,
+    turn: "w",
+    castling: { w: { k: true, q: true }, b: { k: true, q: true } },
+    ep: null,
+    cards: { w: cardsW, b: cardsB },
+    deck: drawPile,
+    coins: { w: 50, b: 50 },
+    variant: isTreino ? "treino" : "padrao",
+    mines: [],
+    fx: [],                          // casas que explodiram na última ação (para animação)
+    kingBlast: [],                   // reis apanhados no raio de uma detonação de mina
+    over: null,
+    lastAction: null,
+    moveNum: 1,
+    log: []
+  };
+}
+
+function cloneState(s) {
+  return {
+    board: s.board.map(row => row.map(p => (p ? Object.assign({}, p, p.st ? { st: Object.assign({}, p.st) } : null) : null))),
+    turn: s.turn,
+    castling: { w: { k: s.castling.w.k, q: s.castling.w.q }, b: { k: s.castling.b.k, q: s.castling.b.q } },
+    ep: s.ep ? s.ep.slice() : null,
+    cards: { w: Object.assign({}, s.cards.w), b: Object.assign({}, s.cards.b) },
+    deck: s.deck.slice(),
+    coins: { w: s.coins.w, b: s.coins.b },
+    variant: s.variant,
+    mines: s.mines.map(m => ({ at: m.at.slice(), c: m.c })),
+    fx: [],
+    kingBlast: [],
+    over: s.over,
+    lastAction: s.lastAction,
+    moveNum: s.moveNum,
+    log: s.log // sims não mexem no log
+  };
+}
+
+const inB = (r, c) => r >= 0 && r <= 7 && c >= 0 && c <= 7;
+const isRock = (p) => !!p && p.t === "X";
+const isPiece = (p) => !!p && p.t !== "X";
+const enemy = (col) => (col === "w" ? "b" : "w");
+const homeRow = (col) => (col === "w" ? 7 : 0);
+
+function findKing(s, col) {
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = s.board[r][c];
+    if (p && p.t === "K" && p.c === col) return [r, c];
+  }
+  return null;
+}
+function mineIdx(s, r, c) {
+  return s.mines.findIndex(m => m.at[0] === r && m.at[1] === c);
+}
+
+function clearPath(s, r, c, tr, tc) {
+  const dr = Math.sign(tr - r), dc = Math.sign(tc - c);
+  let cr = r + dr, cc = c + dc;
+  while (cr !== tr || cc !== tc) {
+    if (s.board[cr][cc] || mineIdx(s, cr, cc) >= 0) return false; // peças, pedras e minas bloqueiam
+    cr += dr; cc += dc;
+  }
+  return true;
+}
+
+function typeAttacks(s, r, c, color, t, tr, tc) {
+  const dr = tr - r, dc = tc - c;
+  const adr = Math.abs(dr), adc = Math.abs(dc);
+  if (dr === 0 && dc === 0) return false;
+  switch (t) {
+    case "P": return dr === (color === "w" ? -1 : 1) && adc === 1;
+    case "N": return (adr === 1 && adc === 2) || (adr === 2 && adc === 1);
+    case "K": return Math.max(adr, adc) === 1;
+    case "B": return adr === adc && clearPath(s, r, c, tr, tc);
+    case "R": return (dr === 0 || dc === 0) && clearPath(s, r, c, tr, tc);
+    case "Q": return (dr === 0 || dc === 0 || adr === adc) && clearPath(s, r, c, tr, tc);
+  }
+  return false;
+}
+
+function canAttack(s, r, c, p, tr, tc) {
+  if (typeAttacks(s, r, c, p.c, p.t, tr, tc)) return true;
+  if (p.st) for (const t in p.st) if (p.st[t] && t !== p.t && typeAttacks(s, r, c, p.c, t, tr, tc)) return true;
+  return false;
+}
+
+function attacksSquare(s, col, tr, tc) {
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = s.board[r][c];
+    if (isPiece(p) && p.c === col && canAttack(s, r, c, p, tr, tc)) return true;
+  }
+  return false;
+}
+
+// Alguma peça de `col` pode PARAR na casa vazia (tr,tc)?
+// (padrões de movimento puros, sem roque — usado para saber se uma mina pode ser detonada)
+function canLandOn(s, col, tr, tc) {
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = s.board[r][c];
+    if (!isPiece(p) || p.c !== col) continue;
+    const types = [p.t];
+    if (p.st) for (const t in p.st) if (p.st[t] && t !== p.t) types.push(t);
+    for (const t of types) {
+      if (t === "P") {
+        const dir = col === "w" ? -1 : 1;
+        const startRow = col === "w" ? 6 : 1;
+        if (c === tc) {
+          if (tr - r === dir) return true;
+          if (r === startRow && tr - r === 2 * dir && !s.board[r + dir][c] && mineIdx(s, r + dir, c) < 0) return true;
+        } else if (s.ep && s.ep[0] === tr && s.ep[1] === tc && tr - r === dir && Math.abs(tc - c) === 1) {
+          return true; // en passant terminando na mina
+        }
+      } else if (typeAttacks(s, r, c, col, t, tr, tc)) {
+        return true; // casa vazia: "atacar" = poder pousar
+      }
+    }
+  }
+  return false;
+}
+
+// Ameaça de explosão:
+// 1) mina no alcance do rei QUE uma peça inimiga possa detonar (pisando nela);
+// 2) torre bomba inimiga que pode capturar uma peça numa casa vizinha do rei;
+// 3) torre bomba do próprio lado, vizinha do rei, que o inimigo pode capturar
+//    (a bomba explode ao ser capturada).
+function blastThreat(s, col, k) {
+  const opp = enemy(col);
+  // o inimigo só pode causar uma explosão se ela não apanhar o REI DELE no raio
+  const oppK = findKing(s, opp);
+  const safeForOpp = (r, c) => !oppK || Math.abs(oppK[0] - r) > 1 || Math.abs(oppK[1] - c) > 1;
+  for (const m of s.mines) {
+    if (Math.abs(m.at[0] - k[0]) <= 1 && Math.abs(m.at[1] - k[1]) <= 1 &&
+        safeForOpp(m.at[0], m.at[1]) &&
+        canLandOn(s, opp, m.at[0], m.at[1])) return true;
+  }
+  for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+    const xr = k[0] + dr, xc = k[1] + dc;
+    if (!inB(xr, xc)) continue;
+    const q = s.board[xr][xc];
+    if (isPiece(q) && q.c === col && q.bm && !q.ar && safeForOpp(xr, xc) && attacksSquare(s, opp, xr, xc)) return true;
+  }
+  let hasBomba = false;
+  for (let r = 0; r < 8 && !hasBomba; r++) for (let c = 0; c < 8; c++) {
+    const p = s.board[r][c];
+    if (isPiece(p) && p.c === opp && p.bm) { hasBomba = true; break; }
+  }
+  if (!hasBomba) return false;
+  for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+    const xr = k[0] + dr, xc = k[1] + dc;
+    if (!inB(xr, xc)) continue;
+    const q = s.board[xr][xc];
+    // armadura NÃO remove a ameaça: a bomba morre nos espinhos, mas explode mesmo assim
+    if (!isPiece(q) || q.c !== col || q.t === "K") continue;
+    if (!safeForOpp(xr, xc)) continue; // a captura explodiria o rei do próprio atacante — ilegal p/ ele
+    for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+      const p = s.board[r][c];
+      if (isPiece(p) && p.c === opp && p.bm && canAttack(s, r, c, p, xr, xc)) return true;
+    }
+  }
+  return false;
+}
+
+function inCheck(s, col) {
+  const k = findKing(s, col);
+  if (!k) return false;
+  if (attacksSquare(s, enemy(col), k[0], k[1])) return true;
+  return blastThreat(s, col, k);
+}
+
+// Cada peça pode carregar no máximo UM efeito (estilo, atirador, bomba ou armadura)
+function hasEffect(p) {
+  if (p.sh || p.bm || p.ar) return true;
+  if (p.st) for (const t in p.st) if (p.st[t]) return true;
+  return false;
+}
+
+/* ---------- remoção de peças (direitos de roque) ---------- */
+function pieceRemoved(s, r, c, p) {
+  if (!p || p.t !== "R") return;
+  const row = homeRow(p.c);
+  if (r === row && c === 0) s.castling[p.c].q = false;
+  if (r === row && c === 7) s.castling[p.c].k = false;
+}
+
+/* ---------- explosões ---------- */
+// Explode a casa (cr,cc) e as 8 vizinhas. Pedras sobrevivem.
+// Peças com armadura perdem só a armadura. Minas na área são destruídas.
+// Explosões (mina E torre bomba) têm o poder de explodir REIS: reis no raio
+// são registrados em s.kingBlast — uma jogada que deixe o PRÓPRIO rei no raio é ilegal
+// (fisicamente o rei permanece no tabuleiro; a camada de legalidade impede o caso).
+function explode(s, cr, cc) {
+  for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+    const r = cr + dr, c = cc + dc;
+    if (!inB(r, c)) continue;
+    s.fx.push([r, c]);
+    const p = s.board[r][c];
+    if (isPiece(p)) {
+      if (p.t === "K") {
+        if (s.kingBlast.indexOf(p.c) < 0) s.kingBlast.push(p.c);
+        continue;
+      }
+      if (p.ar) { delete p.ar; continue; }
+      pieceRemoved(s, r, c, p);
+      s.board[r][c] = null;
+    }
+    const mi = mineIdx(s, r, c);
+    if (mi >= 0) s.mines.splice(mi, 1);
+  }
+}
+
+// Uma peça acabou de PARAR em (r,c): detona mina se houver.
+// (o registro de reis no raio é feito dentro de explode())
+function landingResolve(s, r, c) {
+  const mi = mineIdx(s, r, c);
+  if (mi < 0) return;
+  s.mines.splice(mi, 1);
+  explode(s, r, c);
+}
+
+/* ---------- geração de movimentos ---------- */
+function movesAsType(s, r, c, p, t, out) {
+  const seen = (tr, tc) => out.some(m => m.to[0] === tr && m.to[1] === tc);
+  const okDest = (q) => !q || (isPiece(q) && q.c !== p.c && q.t !== "K");
+  if (t === "N" || t === "K") {
+    for (const [dr, dc] of (t === "N" ? KNIGHT_D : KING_D)) {
+      const tr = r + dr, tc = c + dc;
+      if (!inB(tr, tc) || seen(tr, tc)) continue;
+      const q = s.board[tr][tc];
+      if (!okDest(q)) continue;
+      if (p.t === "K" && isPiece(q) && q.ar) continue; // rei não pode capturar armadura (morreria)
+      out.push({ from: [r, c], to: [tr, tc] });
+    }
+    return;
+  }
+  const dirs = t === "R" ? ROOK_D : t === "B" ? BISHOP_D : ROOK_D.concat(BISHOP_D);
+  for (const [dr, dc] of dirs) {
+    let tr = r + dr, tc = c + dc;
+    while (inB(tr, tc)) {
+      const q = s.board[tr][tc];
+      if (!q) {
+        if (!seen(tr, tc)) out.push({ from: [r, c], to: [tr, tc] });
+        if (mineIdx(s, tr, tc) >= 0) break; // pode PARAR na mina, mas não atravessá-la
+      } else {
+        if (isPiece(q) && q.c !== p.c && q.t !== "K" && !seen(tr, tc)) out.push({ from: [r, c], to: [tr, tc] });
+        break;
+      }
+      tr += dr; tc += dc;
+    }
+  }
+}
+
+function pseudoMoves(s, r, c) {
+  const p = s.board[r][c];
+  if (!isPiece(p)) return [];
+  const out = [];
+  const push = (tr, tc, flags) => out.push(Object.assign({ from: [r, c], to: [tr, tc] }, flags || {}));
+
+  if (p.t === "P") {
+    const dir = p.c === "w" ? -1 : 1;
+    const startRow = p.c === "w" ? 6 : 1;
+    if (inB(r + dir, c) && !s.board[r + dir][c]) {
+      push(r + dir, c);
+      if (r === startRow && !s.board[r + 2 * dir][c] && mineIdx(s, r + dir, c) < 0) push(r + 2 * dir, c, { double: true });
+    }
+    for (const dc of [-1, 1]) {
+      const tr = r + dir, tc = c + dc;
+      if (!inB(tr, tc)) continue;
+      const q = s.board[tr][tc];
+      if (isPiece(q) && q.c !== p.c && q.t !== "K") push(tr, tc);
+      else if (!q && s.ep && s.ep[0] === tr && s.ep[1] === tc) push(tr, tc, { ep: true });
+    }
+  } else if (p.t === "K") {
+    movesAsType(s, r, c, p, "K", out);
+    const rights = s.castling[p.c];
+    const row = homeRow(p.c);
+    if (r === row && c === 4 && !inCheck(s, p.c)) {
+      const opp = enemy(p.c);
+      if (rights.k) {
+        const rk = s.board[row][7];
+        if (isPiece(rk) && rk.t === "R" && rk.c === p.c &&
+            !s.board[row][5] && !s.board[row][6] &&
+            !attacksSquare(s, opp, row, 5) && !attacksSquare(s, opp, row, 6)) {
+          push(row, 6, { castle: "k" });
+        }
+      }
+      if (rights.q) {
+        const rk = s.board[row][0];
+        if (isPiece(rk) && rk.t === "R" && rk.c === p.c &&
+            !s.board[row][1] && !s.board[row][2] && !s.board[row][3] &&
+            !attacksSquare(s, opp, row, 2) && !attacksSquare(s, opp, row, 3)) {
+          push(row, 2, { castle: "q" });
+        }
+      }
+    }
+  } else {
+    movesAsType(s, r, c, p, p.t, out);
+  }
+
+  // estilos extras
+  if (p.st) for (const t in p.st) if (p.st[t] && t !== p.t) movesAsType(s, r, c, p, t, out);
+
+  // marca promoção de peão
+  if (p.t === "P") {
+    const lastRow = p.c === "w" ? 0 : 7;
+    for (const m of out) if (m.to[0] === lastRow) m.promo = true;
+  }
+
+  // bispo atirador: capturas viram tiros (sem se mover)
+  if (p.sh) {
+    for (const m of out) {
+      if (m.castle) continue;
+      const q = s.board[m.to[0]][m.to[1]];
+      if (isPiece(q) && q.c !== p.c) { m.shoot = true; delete m.promo; }
+    }
+  }
+  return out;
+}
+
+function execMove(s, m, promoPiece) {
+  const [r, c] = m.from, [tr, tc] = m.to;
+  const p = s.board[r][c];
+
+  // tiro do bispo atirador: alvo removido, atirador não se move
+  if (m.shoot) {
+    const q = s.board[tr][tc];
+    if (q.ar) { delete q.ar; }
+    else {
+      pieceRemoved(s, tr, tc, q);
+      s.board[tr][tc] = null;
+      if (q.bm) explode(s, tr, tc); // torre bomba capturada explode
+    }
+    s.ep = null;
+    return;
+  }
+
+  // captura de peça com armadura de espinhos: o atacante morre, a armadura quebra.
+  // Se o atacante for uma TORRE BOMBA, ela explode ao ser destruída — a explosão
+  // acontece na casa do alvo (a armadura absorve a explosão; vizinhos e reis não).
+  const capSq = m.ep ? [r, tc] : [tr, tc];
+  const target = s.board[capSq[0]][capSq[1]];
+  if (isPiece(target) && target.c !== p.c && target.ar) {
+    pieceRemoved(s, r, c, p);
+    if (p.t === "K") { s.castling[p.c].k = false; s.castling[p.c].q = false; } // não deve ocorrer (bloqueado na geração)
+    s.board[r][c] = null;
+    if (p.bm) explode(s, capSq[0], capSq[1]); // a explosão consome a armadura (peça sobrevive)
+    else delete target.ar;
+    s.ep = null;
+    return;
+  }
+
+  const wasCapture = m.ep ? true : isPiece(s.board[tr][tc]);
+  const targetHadBm = isPiece(target) && target.c !== p.c && !!target.bm;
+  s.ep = null;
+  if (m.double) s.ep = [(r + tr) / 2, c];
+  if (m.ep) { pieceRemoved(s, r, tc, s.board[r][tc]); s.board[r][tc] = null; }
+  if (wasCapture && !m.ep) pieceRemoved(s, tr, tc, s.board[tr][tc]);
+  if (m.castle) {
+    const row = r;
+    if (m.castle === "k") { s.board[row][5] = s.board[row][7]; s.board[row][7] = null; }
+    else { s.board[row][3] = s.board[row][0]; s.board[row][0] = null; }
+  }
+  s.board[tr][tc] = p;
+  s.board[r][c] = null;
+  if (m.promo || (p.t === "P" && (tr === 0 || tr === 7))) {
+    const np = { t: promoPiece || "Q", c: p.c };
+    if (p.st) np.st = p.st;
+    if (p.ar) np.ar = p.ar;
+    s.board[tr][tc] = np;
+  }
+  // direitos de roque (movimentos do rei/torre)
+  const row0 = homeRow(p.c);
+  if (p.t === "K") { s.castling[p.c].k = false; s.castling[p.c].q = false; }
+  if (p.t === "R" && r === row0 && c === 0) s.castling[p.c].q = false;
+  if (p.t === "R" && r === row0 && c === 7) s.castling[p.c].k = false;
+
+  // pós-efeitos: torre bomba e minas
+  if (m.castle) {
+    const row = r;
+    landingResolve(s, row, m.castle === "k" ? 6 : 2);
+    landingResolve(s, row, m.castle === "k" ? 5 : 3);
+  } else {
+    const moved = s.board[tr][tc];
+    // explode se a torre bomba capturou OU se uma torre bomba foi capturada
+    if (wasCapture && ((moved && moved.bm) || targetHadBm)) explode(s, tr, tc);
+    landingResolve(s, tr, tc);
+  }
+  if (m.double && !s.board[tr][tc]) s.ep = null; // peão morreu na mina: sem en passant
+}
+
+// legal = não deixa o próprio rei em xeque NEM no raio de uma detonação de mina
+function simOk(t, col) {
+  return t.kingBlast.indexOf(col) < 0 && !inCheck(t, col);
+}
+
+function legalMovesFor(s, r, c) {
+  const p = s.board[r][c];
+  if (!isPiece(p) || p.c !== s.turn || s.over) return [];
+  return pseudoMoves(s, r, c).filter((m) => {
+    const t = cloneState(s);
+    execMove(t, m);
+    return simOk(t, p.c);
+  });
+}
+
+function hasLegalBoardMove(s, col) {
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = s.board[r][c];
+    if (!isPiece(p) || p.c !== col) continue;
+    for (const m of pseudoMoves(s, r, c)) {
+      const t = cloneState(s);
+      execMove(t, m);
+      if (simOk(t, col)) return true;
+    }
+  }
+  return false;
+}
+
+/* ---------- cartas ---------- */
+
+// alvos "crus" (antes do filtro de xeque)
+function cardTargetsRaw(s, key) {
+  const me = s.turn;
+  const out = [];
+  const eachSq = (fn) => { for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) fn(r, c, s.board[r][c]); };
+
+  if (STYLE_OF[key]) {
+    const st = STYLE_OF[key];
+    eachSq((r, c, p) => {
+      if (isPiece(p) && p.c === me && p.t !== "K" && p.t !== st && !hasEffect(p)) out.push([r, c]);
+    });
+  } else if (SUMMON_OF[key]) {
+    const row = homeRow(me);
+    for (let c = 0; c < 8; c++) if (!s.board[row][c]) out.push([row, c]);
+  } else if (key === "rock" || key === "mina") {
+    eachSq((r, c, p) => { if (!p && mineIdx(s, r, c) < 0) out.push([r, c]); });
+  } else if (key === "sniper" || key === "mudanca") {
+    eachSq((r, c, p) => {
+      if (isPiece(p) && p.c === enemy(me) && p.t !== "K" && attacksSquare(s, me, r, c)) out.push([r, c]);
+    });
+  } else if (key === "sacrificio") {
+    eachSq((r, c, p) => { if (isPiece(p) && p.c === me && p.t !== "K") out.push([r, c]); });
+  } else if (key === "atirador") {
+    eachSq((r, c, p) => { if (isPiece(p) && p.c === me && p.t === "B" && !hasEffect(p)) out.push([r, c]); });
+  } else if (key === "bomba") {
+    eachSq((r, c, p) => { if (isPiece(p) && p.c === me && p.t === "R" && !hasEffect(p)) out.push([r, c]); });
+  } else if (key === "seguro") {
+    eachSq((r, c, p) => { if (!p) out.push([r, c]); });
+  } else if (key === "armadura") {
+    eachSq((r, c, p) => { if (isPiece(p) && p.c === me && p.t !== "K" && !hasEffect(p)) out.push([r, c]); });
+  }
+  return out;
+}
+
+// efeito da carta (mutação; sem lógica de turno)
+function applyCardEffect(s, key, at) {
+  const me = s.turn;
+  const [r, c] = at;
+  const p = s.board[r][c];
+  if (STYLE_OF[key]) {
+    p.st = p.st || {};
+    p.st[STYLE_OF[key]] = 1;
+  } else if (SUMMON_OF[key]) {
+    s.board[r][c] = { t: SUMMON_OF[key], c: me };
+    landingResolve(s, r, c);
+  } else if (key === "rock") {
+    s.board[r][c] = { t: "X" };
+  } else if (key === "sniper") {
+    if (p.ar) delete p.ar;
+    else {
+      pieceRemoved(s, r, c, p);
+      s.board[r][c] = null;
+      if (p.bm) explode(s, r, c); // torre bomba capturada explode
+    }
+  } else if (key === "mudanca") {
+    pieceRemoved(s, r, c, p); // inimigo perde direitos de roque se for torre em casa
+    p.c = me;
+  } else if (key === "sacrificio") {
+    pieceRemoved(s, r, c, p);
+    s.board[r][c] = null;
+  } else if (key === "atirador") {
+    p.sh = 1;
+  } else if (key === "bomba") {
+    p.bm = 1;
+  } else if (key === "seguro") {
+    const k = findKing(s, me);
+    s.board[r][c] = s.board[k[0]][k[1]];
+    s.board[k[0]][k[1]] = null;
+    s.castling[me].k = false; s.castling[me].q = false;
+    landingResolve(s, r, c);
+  } else if (key === "mina") {
+    s.mines.push({ at: [r, c], c: me });
+  } else if (key === "armadura") {
+    p.ar = 1;
+  }
+  s.ep = null;
+}
+
+// alvos legais (ação não pode terminar com o próprio rei em xeque)
+// tem moedas para pagar a carta? (modo treino: sempre)
+function canAfford(s, key) {
+  return s.variant === "treino" || s.coins[s.turn] >= CARD_COST[key];
+}
+
+const HAND_LIMIT = 5;
+function handSize(s, col) {
+  let n = 0;
+  for (const k in s.cards[col]) if (s.cards[col][k] > 0) n++;
+  return n;
+}
+// Comprar do monte: grátis, gasta o turno; máx. 5 cartas na mão;
+// proibido em xeque (não resolve nada) e indisponível no modo treino.
+function canDraw(s) {
+  return !s.over && s.variant !== "treino" && s.deck.length > 0 &&
+         handSize(s, s.turn) < HAND_LIMIT && !inCheck(s, s.turn);
+}
+
+function cardTargets(s, key) {
+  if (s.over || !s.cards[s.turn][key] || !canAfford(s, key)) return [];
+  return cardTargetsRaw(s, key).filter((at) => {
+    const t = cloneState(s);
+    applyCardEffect(t, key, at);
+    return simOk(t, s.turn);
+  });
+}
+function hasCardAction(s, key) {
+  if (s.over || !s.cards[s.turn][key] || !canAfford(s, key)) return false;
+  return cardTargetsRaw(s, key).some((at) => {
+    const t = cloneState(s);
+    applyCardEffect(t, key, at);
+    return simOk(t, s.turn);
+  });
+}
+
+function playerHasAnyAction(s, col) {
+  const view = s.turn === col ? s : Object.assign(cloneState(s), { turn: col });
+  if (hasLegalBoardMove(view, col)) return true;
+  if (canDraw(view)) return true; // comprar do monte também é uma ação
+  for (const key of CARD_KEYS) if (hasCardAction(view, key)) return true;
+  return false;
+}
+
+/* ---------- aplicação de ações ---------- */
+
+const FILES = "abcdefgh";
+const sqName = (r, c) => FILES[c] + (8 - r);
+
+// Ação: {kind:'move', from, to, promo?} | {kind:'card', card, at}
+function applyAction(s, a) {
+  if (s.over) return { ok: false, error: "Partida encerrada." };
+  const me = s.turn;
+  s.fx = [];
+  s.kingBlast = [];
+  let logTxt = "";
+
+  if (a.kind === "move") {
+    const legal = legalMovesFor(s, a.from[0], a.from[1]);
+    const m = legal.find((x) => x.to[0] === a.to[0] && x.to[1] === a.to[1]);
+    if (!m) return { ok: false, error: "Movimento ilegal." };
+    const p = s.board[a.from[0]][a.from[1]];
+    const targetBefore = m.ep ? s.board[a.from[0]][a.to[1]] : s.board[a.to[0]][a.to[1]];
+    const targetArmored = isPiece(targetBefore) && !!targetBefore.ar;
+    const promo = ["Q", "R", "B", "N"].indexOf(a.promo) >= 0 ? a.promo : "Q";
+    execMove(s, m, promo);
+    if (m.shoot) {
+      logTxt = `🎯 ${PIECE_PT[p.t]} ${sqName(a.from[0], a.from[1])} atira em ${sqName(a.to[0], a.to[1])}` +
+        (targetArmored ? " (armadura quebrada)" : ` (${PIECE_PT[targetBefore.t]} capturado)`);
+    } else if (targetArmored) {
+      // armadura refletiu: alvo continua lá, atacante morreu
+      logTxt = `🛡️ ${PIECE_PT[p.t]} ${sqName(a.from[0], a.from[1])} morre nos espinhos de ${sqName(a.to[0], a.to[1])}`;
+      if (s.fx.length) logTxt += " 💥"; // era uma torre bomba: explodiu mesmo assim
+    } else {
+      const captured = m.ep ? true : isPiece(targetBefore);
+      logTxt = `${PIECE_PT[p.t]} ${sqName(a.from[0], a.from[1])}${captured ? "×" : "→"}${sqName(a.to[0], a.to[1])}`;
+      if (m.castle) logTxt = m.castle === "k" ? "Roque curto (O-O)" : "Roque longo (O-O-O)";
+      else if (m.promo) logTxt += " =" + ({ Q: "D", R: "T", B: "B", N: "C" })[promo];
+      if (s.fx.length) logTxt += " 💥";
+    }
+  } else if (a.kind === "card") {
+    const key = a.card;
+    if (!CARD_INFO[key]) return { ok: false, error: "Carta desconhecida." };
+    if (!s.cards[me][key]) return { ok: false, error: "Você não tem essa carta." };
+    if (!canAfford(s, key)) return { ok: false, error: "Moedas insuficientes: custa " + CARD_COST[key] + " 🪙 e você tem " + s.coins[me] + "." };
+    const tgts = cardTargets(s, key);
+    if (!tgts.some((d) => d[0] === a.at[0] && d[1] === a.at[1])) return { ok: false, error: "Alvo inválido para a carta." };
+    const p = s.board[a.at[0]][a.at[1]];
+    const info = CARD_INFO[key];
+    applyCardEffect(s, key, a.at);
+    delete s.cards[me][key]; // a carta jogada sai da mão
+    if (s.variant !== "treino") s.coins[me] -= CARD_COST[key];
+    const at = sqName(a.at[0], a.at[1]);
+    if (STYLE_OF[key]) logTxt = `${info.icone} Carta: ${PIECE_PT[p.t]} em ${at} ganha o ${info.nome}`;
+    else if (SUMMON_OF[key]) logTxt = `${info.icone} Carta: ${PIECE_PT[SUMMON_OF[key]]} invocado em ${at}` + (s.fx.length ? " 💥" : "");
+    else if (key === "rock") logTxt = `${info.icone} Carta: pedra em ${at}`;
+    else if (key === "sniper") logTxt = `${info.icone} Carta: golpe à distância em ${at}` + (isPiece(s.board[a.at[0]][a.at[1]]) ? " (armadura quebrada)" : ` (${PIECE_PT[p.t]} capturado)`);
+    else if (key === "mudanca") logTxt = `${info.icone} Carta: ${PIECE_PT[p.t]} em ${at} troca de time!`;
+    else if (key === "sacrificio") logTxt = `${info.icone} Carta: ${PIECE_PT[p.t]} em ${at} é sacrificado`;
+    else if (key === "atirador") logTxt = `${info.icone} Carta: Bispo em ${at} vira atirador`;
+    else if (key === "bomba") logTxt = `${info.icone} Carta: Torre em ${at} vira bomba`;
+    else if (key === "seguro") logTxt = `${info.icone} Carta: Rei se teletransporta para ${at}` + (s.fx.length ? " 💥" : "");
+    else if (key === "mina") logTxt = `${info.icone} Carta: mina em ${at}`;
+    else if (key === "armadura") logTxt = `${info.icone} Carta: ${PIECE_PT[p.t]} em ${at} ganha armadura de espinhos`;
+    if (s.variant !== "treino") logTxt += ` (−${CARD_COST[key]} 🪙)`;
+  } else if (a.kind === "draw") {
+    if (s.variant === "treino") return { ok: false, error: "No modo treino você já tem todas as cartas." };
+    if (s.deck.length === 0) return { ok: false, error: "O monte acabou." };
+    if (handSize(s, me) >= HAND_LIMIT) return { ok: false, error: "Mão cheia: máximo de " + HAND_LIMIT + " cartas." };
+    if (inCheck(s, me)) return { ok: false, error: "Em xeque você não pode comprar carta." };
+    const drawn = s.deck.shift();
+    s.cards[me][drawn] = 1;
+    s.ep = null;
+    logTxt = `🂠 Compra uma carta do monte (${s.deck.length} restante${s.deck.length === 1 ? "" : "s"})`;
+  } else {
+    return { ok: false, error: "Ação desconhecida." };
+  }
+
+  // cada lance rende +5 moedas a quem jogou
+  if (s.variant !== "treino") s.coins[me] += 5;
+
+  s.lastAction = a;
+  s.log.push({ n: s.moveNum, c: me, txt: logTxt });
+  if (me === "b") s.moveNum++;
+
+  s.turn = enemy(me);
+  const oppChecked = inCheck(s, s.turn);
+  if (!playerHasAnyAction(s, s.turn)) {
+    if (oppChecked) {
+      s.over = { result: "mate", winner: me };
+      s.log.push({ n: s.moveNum, c: me, txt: "Xeque-mate!" });
+    } else {
+      s.over = { result: "stalemate", winner: null };
+      s.log.push({ n: s.moveNum, c: me, txt: "Empate por afogamento." });
+    }
+  } else if (oppChecked) {
+    s.log[s.log.length - 1].txt += " +";
+  }
+  return { ok: true, check: oppChecked };
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    CARD_INFO, CARD_KEYS, CARD_COST, STYLE_OF, SUMMON_OF, canAfford, canDraw, handSize, HAND_LIMIT,
+    initialState, cloneState, inCheck, attacksSquare,
+    legalMovesFor, cardTargets, cardTargetsRaw, applyAction,
+    hasLegalBoardMove, playerHasAnyAction, sqName, PIECE_PT,
+    isRock, isPiece, mineIdx, canLandOn, hasEffect
+  };
+}
+
+</script>
+<script>
+/* ============================================================
+   Xadrez com Cartas — Interface + Multiplayer (PeerJS)
+   Peças: conjunto SVG "staunty" (lichess, licença aberta)
+   ============================================================ */
+"use strict";
+
+const COLOR_PT = { w: "Brancas", b: "Pretas" };
+const PEER_PREFIX = "xzcartas26-";
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+let state = null;
+let mode = null;          // 'local' | 'host' | 'guest' | 'matched'
+let myColor = null;
+let flipped = false;
+let peer = null, conn = null;
+let roomCode = "";
+let connOn = false;
+let overShown = false;
+let fxSeen = 0;
+
+// seleção
+let sel = null;
+let selDests = [];
+let cardMode = null;      // chave da carta ativa
+let cardTargetsUI = [];
+
+// drag & drop
+let drag = null;
+let suppressClick = false;
+
+// promoção pendente
+let pendingPromo = null; // {from, to}
+
+const $ = (id) => document.getElementById(id);
+
+/* ---------- conta / servidor Chesstable ---------- */
+const SERVER = location.protocol === "http:" || location.protocol === "https:";
+let authToken = null;
+try { authToken = localStorage.getItem("ct_token"); } catch (e) {}
+let me = null;            // usuário logado
+let ws = null;            // WebSocket do servidor
+let searching = false;
+let opponent = null;      // {nome, rating} na partida rankeada
+let ratingNote = "";      // "1200 → 1215" para a tela de fim
+
+function api(p, body) {
+  return fetch(p, {
+    method: body ? "POST" : "GET",
+    headers: { "Content-Type": "application/json", "X-Token": authToken || "" },
+    body: body ? JSON.stringify(body) : undefined
+  }).then(r => r.json());
+}
+function acctMsg(html) { $("acctMsg").innerHTML = html; }
+function renderAccount() {
+  if (!SERVER) {
+    $("accountCard").innerHTML = "<h2>♞ Sua conta</h2><div class='small'>Contas, busca de partida e rating funcionam quando o jogo roda no servidor Chesstable (node server.js) — veja o README. Os modos abaixo funcionam normalmente.</div>";
+    return;
+  }
+  $("acctLogged").hidden = !me;
+  $("acctForms").hidden = !!me;
+  if (me) {
+    $("acctInfo").innerHTML = "👤 " + me.nome + ' · <span class="rt">⭐ ' + me.rating + "</span>" +
+      '<span class="sub">' + me.partidas + " partidas · " + me.vitorias + "V " + me.empates + "E " + me.derrotas + "D</span>";
+  }
+  api("/api/ranking").then(r => {
+    if (!r.top || !r.top.length) { $("rankingBox").innerHTML = ""; return; }
+    $("rankingBox").innerHTML = "<b>🏆 Ranking</b><table>" + r.top.slice(0, 5).map((u, i) =>
+      "<tr><td>" + (i + 1) + ". " + u.nome + "</td><td class='rt'>" + u.rating + "</td></tr>").join("") + "</table>";
+  }).catch(() => {});
+}
+function tryResume() {
+  if (!SERVER || !authToken) { renderAccount(); return; }
+  api("/api/eu").then(r => {
+    if (r.ok) { me = r.usuario; connectWS(); }
+    else { authToken = null; try { localStorage.removeItem("ct_token"); } catch (e) {} }
+    renderAccount();
+  }).catch(() => renderAccount());
+}
+function doRegister() {
+  const nome = $("rgNome").value, email = $("rgEmail").value, senha = $("rgSenha").value;
+  acctMsg("Criando conta…");
+  api("/api/registrar", { nome, email, senha }).then(r => {
+    if (r.erro) return acctMsg("⚠️ " + r.erro);
+    if (r.demo) acctMsg("✅ Conta criada! (servidor sem e-mail configurado — modo demonstração)<br><a href='" + r.demo + "' target='_blank'>➡️ Clique aqui para confirmar sua conta</a><br>Depois volte e faça login.");
+    else acctMsg("✅ Conta criada! Enviamos um <b>link de confirmação</b> para " + email + ". Clique nele e depois faça login aqui.");
+  }).catch(() => acctMsg("⚠️ Erro de conexão com o servidor."));
+}
+function doLogin() {
+  acctMsg("Entrando…");
+  api("/api/entrar", { nome: $("liNome").value, senha: $("liSenha").value }).then(r => {
+    if (r.erro) return acctMsg("⚠️ " + r.erro);
+    authToken = r.token; me = r.usuario;
+    try { localStorage.setItem("ct_token", authToken); } catch (e) {}
+    acctMsg("");
+    connectWS();
+    renderAccount();
+  }).catch(() => acctMsg("⚠️ Erro de conexão com o servidor."));
+}
+function doLogout() {
+  api("/api/sair", {}).catch(() => {});
+  authToken = null; me = null; searching = false;
+  try { localStorage.removeItem("ct_token"); } catch (e) {}
+  if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+  renderAccount();
+}
+function connectWS() {
+  if (!SERVER || !authToken) return;
+  if (ws && ws.readyState <= 1) return;
+  ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host);
+  ws.onopen = () => ws.send(JSON.stringify({ t: "auth", token: authToken }));
+  ws.onclose = () => { if (searching) { searching = false; setQueueUI(); } };
+  ws.onmessage = (ev) => {
+    let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+    if (m.t === "authed") { me = m.usuario; renderAccount(); if (searching) ws.send(JSON.stringify({ t: "buscar" })); }
+    else if (m.t === "erro") { toast(m.erro); }
+    else if (m.t === "na-fila") { searching = true; setQueueUI(); }
+    else if (m.t === "fora-da-fila") { searching = false; setQueueUI(); }
+    else if (m.t === "match") {
+      searching = false; setQueueUI();
+      mode = "matched"; myColor = m.cor; opponent = m.oponente; roomCode = ""; ratingNote = "";
+      startGame(m.state);
+      toast("Partida encontrada! Você joga de " + COLOR_PT[myColor] + " contra " + opponent.nome + " (⭐" + opponent.rating + ").");
+    }
+    else if (m.t === "action") {
+      const res = applyAction(state, m.action);
+      if (res.ok) { clearSelection(); render(); if (res.check && state.turn === myColor && !state.over) toast("Xeque!"); }
+    }
+    else if (m.t === "invalido") { state = m.state; clearSelection(); render(); toast("Jogada rejeitada pelo servidor — tabuleiro sincronizado."); }
+    else if (m.t === "empate-oferta") {
+      if (confirm("O oponente propõe empate. Aceitar?")) ws.send(JSON.stringify({ t: "empate-aceite" }));
+      else ws.send(JSON.stringify({ t: "empate-recusa" }));
+    }
+    else if (m.t === "empate-recusa") { toast("O oponente recusou o empate."); }
+    else if (m.t === "fim") {
+      if (state && !state.over) {
+        if (m.motivo === "empate-acordado") state.over = { result: "draw", winner: null };
+        else if (m.motivo === "desistencia" || m.motivo === "abandono") state.over = { result: "resign", winner: m.sWhite === 1 ? "w" : "b" };
+      }
+      const r = m.cor === "w" ? m.ratings.w : m.ratings.b;
+      ratingNote = "⭐ Seu rating: " + r.antes + " → " + r.depois;
+      me = m.usuario;
+      overShown = false;
+      render();
+      renderAccount();
+    }
+  };
+}
+function setQueueUI() {
+  $("queueStatus").textContent = searching ? "🔎 Procurando oponente… (deixe esta tela aberta)" : "";
+  $("btnBuscar").textContent = searching ? "✋ Cancelar busca" : "🔎 Buscar partida (rankeada)";
+}
+function buscarClicked() {
+  if (!me) return;
+  if (!ws || ws.readyState !== 1) { connectWS(); searching = true; setQueueUI(); return; }
+  if (searching) { ws.send(JSON.stringify({ t: "cancelar-busca" })); }
+  else { ws.send(JSON.stringify({ t: "buscar" })); }
+}
+function sendGame(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+
+/* ---------- helpers ---------- */
+function pieceSvg(p) {
+  if (p.t === "X") return '<svg class="psvg rocksvg"><use href="#p-rock"/></svg>';
+  return '<svg class="psvg"><use href="#p-' + p.c + p.t + '"/></svg>';
+}
+function badgesHtml(p) {
+  let out = "";
+  if (p.st) for (const t of ["N", "B", "R", "Q"]) if (p.st[t] && t !== p.t) {
+    out += '<span class="badge stbadge" title="Estilo ' + PIECE_PT[t] + '"><svg><use href="#p-' + p.c + t + '"/></svg></span>';
+  }
+  if (p.sh) out += '<span class="badge shbadge" title="Bispo Atirador">🎯</span>';
+  if (p.bm) out += '<span class="badge bmbadge" title="Torre Bomba">💣</span>';
+  return out ? '<span class="badges">' + out + "</span>" : "";
+}
+function squareContentHtml(r, c) {
+  const p = state.board[r][c];
+  if (p) {
+    let html = pieceSvg(p);
+    if (isPiece(p)) {
+      html += badgesHtml(p);
+      if (p.ar) html += '<span class="badge armorbadge" title="Armadura de Espinhos">🛡️</span>';
+    }
+    return html;
+  }
+  if (mineIdx(state, r, c) >= 0) return '<svg class="minesvg"><use href="#p-mine"/></svg>';
+  return "";
+}
+function myTurn() {
+  if (!state || state.over) return false;
+  if (mode === "local") return true;
+  return state.turn === myColor;
+}
+function toast(msg, ms) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.classList.remove("show"), ms || 2600);
+}
+function clearSelection() {
+  sel = null; selDests = []; cardMode = null; cardTargetsUI = [];
+}
+
+/* ---------- telas ---------- */
+function showMenu() {
+  $("menu").hidden = false;
+  $("game").hidden = true;
+  $("overlay").hidden = true;
+  $("hostPanel").hidden = true;
+  $("joinPanel").hidden = true;
+  if (peer) { try { peer.destroy(); } catch (e) {} peer = null; conn = null; connOn = false; }
+}
+function startGame(st) {
+  state = st || initialState();
+  clearSelection();
+  fxSeen = state.log.length;
+  flipped = (myColor === "b");
+  $("menu").hidden = true;
+  $("game").hidden = false;
+  $("overlay").hidden = true;
+  render();
+}
+
+/* ---------- rede ---------- */
+function genCode() {
+  let c = "";
+  for (let i = 0; i < 5; i++) c += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  return c;
+}
+function netFail(msg) {
+  toast(msg, 5000);
+  $("hostStatus").textContent = msg;
+  $("joinStatus").textContent = msg;
+}
+function wireConn() {
+  conn.on("data", onMsg);
+  conn.on("close", () => { connOn = false; if (state && !state.over) toast("⚠️ O oponente desconectou.", 6000); renderStatus(); });
+  conn.on("error", () => netFail("Erro na conexão."));
+}
+function hostGame() {
+  if (typeof Peer === "undefined") { netFail("Biblioteca de rede não carregou. Verifique sua internet."); return; }
+  roomCode = genCode();
+  $("hostPanel").hidden = false;
+  $("joinPanel").hidden = true;
+  $("hostCode").textContent = roomCode;
+  $("hostStatus").textContent = "Aguardando o oponente entrar…";
+  peer = new Peer(PEER_PREFIX + roomCode);
+  peer.on("error", (e) => {
+    if (e.type === "unavailable-id") { hostGame(); return; }
+    netFail("Falha na rede: " + e.type);
+  });
+  peer.on("connection", (c) => {
+    conn = c;
+    conn.on("open", () => {
+      mode = "host"; myColor = "w";
+      wireConn();
+      startGame();
+      conn.send({ type: "start", state: state, color: "b" });
+      connOn = true;
+      renderStatus();
+      toast("Oponente conectado! Você joga de Brancas.");
+    });
+  });
+}
+function joinGame(code) {
+  if (typeof Peer === "undefined") { netFail("Biblioteca de rede não carregou. Verifique sua internet."); return; }
+  code = code.trim().toUpperCase();
+  if (code.length < 4) { toast("Digite o código da sala."); return; }
+  $("joinStatus").textContent = "Conectando…";
+  peer = new Peer();
+  peer.on("error", (e) => {
+    if (e.type === "peer-unavailable") netFail("Sala não encontrada. Confira o código.");
+    else netFail("Falha na rede: " + e.type);
+  });
+  peer.on("open", () => {
+    conn = peer.connect(PEER_PREFIX + code, { reliable: true });
+    conn.on("open", () => {
+      mode = "guest"; myColor = "b";
+      wireConn();
+      conn.send({ type: "hello" });
+      $("joinStatus").textContent = "Conectado! Aguardando início…";
+    });
+    conn.on("error", () => netFail("Não foi possível conectar."));
+  });
+}
+function onMsg(msg) {
+  if (!msg || !msg.type) return;
+  if (msg.type === "start") {
+    myColor = msg.color;
+    mode = mode || "guest";
+    connOn = true;
+    startGame(msg.state);
+    toast("Partida iniciada! Você joga de " + COLOR_PT[myColor] + ".");
+  } else if (msg.type === "action") {
+    const res = applyAction(state, msg.action);
+    if (!res.ok) { conn.send({ type: "sync-req" }); return; }
+    clearSelection();
+    render();
+    if (res.check && state.turn === myColor && !state.over) toast("Xeque!");
+  } else if (msg.type === "sync-req") {
+    conn.send({ type: "sync", state: state });
+  } else if (msg.type === "sync") {
+    state = msg.state;
+    clearSelection();
+    render();
+  } else if (msg.type === "resign") {
+    endBy("resign", enemy(msg.by));
+    toast("O oponente desistiu da partida.");
+  } else if (msg.type === "draw-offer") {
+    if (confirm("O oponente propõe empate. Aceitar?")) {
+      endBy("draw", null);
+      conn.send({ type: "draw-accept" });
+    } else {
+      conn.send({ type: "draw-decline" });
+    }
+  } else if (msg.type === "draw-accept") {
+    endBy("draw", null);
+    toast("O oponente aceitou o empate.");
+  } else if (msg.type === "draw-decline") {
+    toast("O oponente recusou o empate.");
+  } else if (msg.type === "restart") {
+    clearSelection();
+    $("overlay").hidden = true;
+    state = msg.state || initialState();
+    fxSeen = 0;
+    toast("O oponente iniciou uma nova partida.");
+    render();
+  }
+}
+function doAction(a) {
+  const res = applyAction(state, a);
+  if (!res.ok) { toast(res.error || "Jogada inválida."); return false; }
+  if (conn) conn.send({ type: "action", action: a });
+  else if (mode === "matched") sendGame({ t: "action", action: a });
+  clearSelection();
+  render();
+  return true;
+}
+
+/* ---------- promoção ---------- */
+function tryMove(from, to, dests) {
+  const m = dests.find(d => d.to[0] === to[0] && d.to[1] === to[1]);
+  if (!m) return false;
+  if (m.promo && !m.shoot) { openPromo(from, to); return true; }
+  return doAction({ kind: "move", from: from, to: to });
+}
+function openPromo(from, to) {
+  pendingPromo = { from: from, to: to };
+  const col = state.turn;
+  $("promoChoices").innerHTML = ["Q", "R", "B", "N"].map(t =>
+    '<button class="promobtn" data-t="' + t + '" title="' + PIECE_PT[t] + '"><svg><use href="#p-' + col + t + '"/></svg></button>'
+  ).join("");
+  for (const btn of $("promoChoices").children) {
+    btn.addEventListener("click", () => {
+      const t = btn.dataset.t;
+      const pp = pendingPromo;
+      closePromo();
+      if (pp) doAction({ kind: "move", from: pp.from, to: pp.to, promo: t });
+    });
+  }
+  $("promoModal").hidden = false;
+}
+function closePromo() {
+  pendingPromo = null;
+  $("promoModal").hidden = true;
+}
+
+/* ---------- cartas ---------- */
+function activateCard(col, key, silent) {
+  clearSelection();
+  cardMode = key;
+  cardTargetsUI = cardTargets(state, key);
+  if (cardTargetsUI.length === 0) {
+    if (!silent) {
+      toast(inCheck(state, state.turn)
+        ? "Nenhum alvo válido — a ação precisa livrar o rei do xeque."
+        : "Nenhum alvo válido para esta carta agora.");
+    }
+    clearSelection();
+    return false;
+  }
+  if (!silent) toast(CARD_INFO[key].hint);
+  return true;
+}
+
+/* ---------- interação: clique ---------- */
+function squareClicked(r, c) {
+  if (suppressClick) return;
+  if (!state || state.over || !myTurn()) return;
+  const p = state.board[r][c];
+  const meCol = state.turn;
+
+  if (cardMode) {
+    if (cardTargetsUI.some(t => t[0] === r && t[1] === c)) doAction({ kind: "card", card: cardMode, at: [r, c] });
+    else { clearSelection(); render(); }
+    return;
+  }
+
+  if (sel && sel[0] === r && sel[1] === c) { clearSelection(); render(); return; }
+
+  if (sel) {
+    const m = selDests.find(d => d.to[0] === r && d.to[1] === c);
+    if (m) { tryMove(sel, [r, c], selDests); return; }
+  }
+  if (isPiece(p) && p.c === meCol) {
+    sel = [r, c];
+    selDests = legalMovesFor(state, r, c);
+    render();
+  } else {
+    clearSelection();
+    render();
+  }
+}
+
+function cardClicked(col, key) {
+  if (suppressClick) return;
+  if (!state || state.over || !myTurn()) return;
+  if (col !== state.turn) return;
+  if (mode !== "local" && col !== myColor) return;
+  if (!state.cards[col][key]) return;
+  if (!afford(col, key)) {
+    toast("Moedas insuficientes: " + CARD_INFO[key].nome + " custa " + CARD_COST[key] + " 🪙 e você tem " + state.coins[col] + ".");
+    return;
+  }
+  if (cardMode === key) { clearSelection(); render(); return; }
+  activateCard(col, key);
+  render();
+}
+
+/* ---------- interação: arrastar e soltar ---------- */
+function ghostEl() { return $("ghost"); }
+function moveGhost(x, y) {
+  const g = ghostEl();
+  g.style.left = x + "px";
+  g.style.top = y + "px";
+}
+function boardSquareAt(r, c) {
+  return document.querySelector('.sq[data-r="' + r + '"][data-c="' + c + '"]');
+}
+function squareFromPoint(x, y) {
+  const el = document.elementFromPoint(x, y);
+  const sq = el && el.closest ? el.closest(".sq") : null;
+  return sq ? [+sq.dataset.r, +sq.dataset.c] : null;
+}
+function startPieceDrag(e) {
+  const sq = boardSquareAt(drag.from[0], drag.from[1]);
+  const sz = sq ? sq.getBoundingClientRect().width : 64;
+  sel = drag.from.slice();
+  selDests = legalMovesFor(state, sel[0], sel[1]);
+  cardMode = null; cardTargetsUI = [];
+  render();
+  if (sq) sq.classList.add("dragsrc");
+  const g = ghostEl();
+  g.innerHTML = pieceSvg(state.board[drag.from[0]][drag.from[1]]);
+  g.style.width = g.style.height = Math.round(sz * 0.95) + "px";
+  g.hidden = false;
+  moveGhost(e.clientX, e.clientY);
+}
+function startCardDrag(e) {
+  if (cardMode !== drag.cardKey) {
+    if (!activateCard(drag.cardCol, drag.cardKey)) { drag = null; render(); return; }
+  }
+  render();
+  const g = ghostEl();
+  const info = CARD_INFO[drag.cardKey];
+  g.innerHTML = '<div class="ghostcard"><div>' + info.icone + '</div><span>' + info.nome + "</span></div>";
+  g.style.width = "88px"; g.style.height = "auto";
+  g.hidden = false;
+  moveGhost(e.clientX, e.clientY);
+}
+function onPointerMove(e) {
+  if (!drag) return;
+  if (!drag.started) {
+    if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 7) return;
+    drag.started = true;
+    if (drag.kind === "piece") startPieceDrag(e);
+    else startCardDrag(e);
+    if (!drag) return;
+  }
+  moveGhost(e.clientX, e.clientY);
+  document.querySelectorAll(".sq.hover").forEach(el => el.classList.remove("hover"));
+  const sq = squareFromPoint(e.clientX, e.clientY);
+  if (sq) {
+    const el = boardSquareAt(sq[0], sq[1]);
+    if (el) el.classList.add("hover");
+  }
+}
+function onPointerUp(e) {
+  if (!drag) return;
+  const d = drag; drag = null;
+  document.querySelectorAll(".sq.hover").forEach(el => el.classList.remove("hover"));
+  document.querySelectorAll(".sq.dragsrc").forEach(el => el.classList.remove("dragsrc"));
+  const g = ghostEl(); g.hidden = true; g.innerHTML = "";
+  if (!d.started) return;
+  suppressClick = true;
+  setTimeout(() => { suppressClick = false; }, 80);
+  const sq = squareFromPoint(e.clientX, e.clientY);
+  if (d.kind === "piece") {
+    if (sq && selDests.some(m => m.to[0] === sq[0] && m.to[1] === sq[1])) {
+      tryMove(d.from, sq, selDests);
+    } else if (sq && sq[0] === d.from[0] && sq[1] === d.from[1]) {
+      render();
+    } else {
+      clearSelection(); render();
+    }
+  } else {
+    if (sq && cardTargetsUI.some(t => t[0] === sq[0] && t[1] === sq[1])) {
+      doAction({ kind: "card", card: d.cardKey, at: sq });
+    } else if (!sq) {
+      render();
+    } else {
+      clearSelection(); render();
+    }
+  }
+}
+function squarePointerDown(e, r, c) {
+  if (!state || state.over || !myTurn() || cardMode) return;
+  const p = state.board[r][c];
+  if (!isPiece(p) || p.c !== state.turn) return;
+  if (mode !== "local" && p.c !== myColor) return;
+  drag = { kind: "piece", from: [r, c], started: false, sx: e.clientX, sy: e.clientY };
+}
+function cardPointerDown(e, col, key) {
+  if (!state || state.over || !myTurn()) return;
+  if (col !== state.turn) return;
+  if (mode !== "local" && col !== myColor) return;
+  if (!state.cards[col][key] || !afford(col, key)) return;
+  drag = { kind: "card", cardKey: key, cardCol: col, started: false, sx: e.clientX, sy: e.clientY };
+}
+
+/* ---------- renderização ---------- */
+function buildBoard() {
+  const board = $("board");
+  board.innerHTML = "";
+  for (let vr = 0; vr < 8; vr++) {
+    for (let vc = 0; vc < 8; vc++) {
+      const r = flipped ? 7 - vr : vr;
+      const c = flipped ? 7 - vc : vc;
+      const sq = document.createElement("div");
+      sq.className = "sq " + ((r + c) % 2 === 0 ? "light" : "dark");
+      sq.dataset.r = r; sq.dataset.c = c;
+      let coords = "";
+      if (vc === 0) coords += '<span class="coord rank">' + (8 - r) + "</span>";
+      if (vr === 7) coords += '<span class="coord file">' + "abcdefgh"[c] + "</span>";
+      sq.innerHTML = coords + '<span class="pc"></span>';
+      sq.addEventListener("click", () => squareClicked(r, c));
+      sq.addEventListener("pointerdown", (e) => squarePointerDown(e, r, c));
+      board.appendChild(sq);
+    }
+  }
+}
+
+function render() {
+  if (!state) return;
+  const board = $("board");
+  if (!board.children.length || board._flipped !== flipped) { buildBoard(); board._flipped = flipped; }
+
+  const kingChk = inCheck(state, state.turn) ? findKingPos(state, state.turn) : null;
+  const la = state.lastAction;
+  const lastSqs = [];
+  if (la) {
+    if (la.kind === "move") { lastSqs.push(la.from, la.to); }
+    else if (la.at) lastSqs.push(la.at);
+  }
+  const animateFx = state.fx && state.fx.length && state.log.length !== fxSeen;
+  fxSeen = state.log.length;
+
+  for (const sq of board.children) {
+    const r = +sq.dataset.r, c = +sq.dataset.c;
+    const p = state.board[r][c];
+    sq.classList.remove("selected", "dest", "capture", "cardtarget", "last", "check");
+    const pc = sq.querySelector(".pc");
+    const html = squareContentHtml(r, c);
+    if (pc.innerHTML !== html) pc.innerHTML = html;
+
+    if (lastSqs.some(s2 => s2 && s2[0] === r && s2[1] === c)) sq.classList.add("last");
+    if (kingChk && kingChk[0] === r && kingChk[1] === c) sq.classList.add("check");
+
+    if (cardMode) {
+      if (cardTargetsUI.some(t => t[0] === r && t[1] === c)) {
+        sq.classList.add("cardtarget");
+        if (isPiece(p)) sq.classList.add("capture");
+      }
+    } else if (sel) {
+      if (sel[0] === r && sel[1] === c) sq.classList.add("selected");
+      const m = selDests.find(d => d.to[0] === r && d.to[1] === c);
+      if (m) sq.classList.add(isPiece(p) || m.ep || m.shoot ? "capture" : "dest");
+    }
+
+    if (animateFx && state.fx.some(f => f[0] === r && f[1] === c)) {
+      const b = document.createElement("span");
+      b.className = "boomfx";
+      sq.appendChild(b);
+      setTimeout(() => b.remove(), 750);
+    }
+  }
+
+  renderHands();
+  renderStatus();
+  renderLog();
+  if (state.over && !overShown) { overShown = true; showGameOver(); }
+  if (!state.over) overShown = false;
+}
+
+function findKingPos(s, col) {
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = s.board[r][c];
+    if (p && p.t === "K" && p.c === col) return [r, c];
+  }
+  return null;
+}
+
+/* ---------- artes das cartas ---------- */
+function miniBg(x, y, n, size) {
+  let out = "";
+  for (let i = 0; i < n; i++) {
+    out += '<rect x="' + (x + i * size) + '" y="' + y + '" width="' + size + '" height="' + size +
+      '" fill="' + (i % 2 === 0 ? "#efdab5" : "#a97b52") + '" rx="1"/>';
+  }
+  return out;
+}
+function star(cx, cy, ro, ri, fill) {
+  let pts = "";
+  for (let i = 0; i < 8; i++) {
+    const rr = i % 2 === 0 ? ro : ri;
+    const a = (Math.PI / 4) * i - Math.PI / 2;
+    pts += (cx + rr * Math.cos(a)).toFixed(1) + "," + (cy + rr * Math.sin(a)).toFixed(1) + " ";
+  }
+  return '<polygon points="' + pts + '" fill="' + fill + '"/>';
+}
+function cardArt(key, col) {
+  const my = col, op = col === "w" ? "b" : "w";
+  const V = (inner) => '<svg viewBox="0 0 92 66">' + inner + "</svg>";
+  if (STYLE_OF[key]) {
+    const t = STYLE_OF[key];
+    return V(miniBg(6, 38, 4, 20) +
+      '<use href="#p-' + my + 'P" x="10" y="12" width="26" height="26"/>' +
+      '<path d="M36 24 Q56 4 66 22" fill="none" stroke="#8b6ce8" stroke-width="2.6" stroke-dasharray="5 4" stroke-linecap="round"/>' +
+      '<circle cx="70" cy="24" r="12" fill="#8b6ce8"/>' +
+      '<use href="#p-' + my + t + '" x="60" y="14" width="20" height="20"/>');
+  }
+  if (SUMMON_OF[key]) {
+    const t = SUMMON_OF[key];
+    return V(miniBg(6, 40, 4, 20) +
+      '<use href="#p-' + my + t + '" x="32" y="10" width="30" height="30"/>' +
+      star(24, 14, 6, 2.4, "#f2cf63") + star(68, 20, 5, 2, "#f2cf63") + star(30, 34, 4, 1.6, "#f2cf63"));
+  }
+  if (key === "rock") {
+    return V(miniBg(6, 38, 4, 20) + '<use href="#p-rock" x="30" y="8" width="34" height="34"/>');
+  }
+  if (key === "sniper") {
+    return V(miniBg(6, 38, 4, 20) +
+      '<use href="#p-' + my + 'R" x="8" y="14" width="26" height="26"/>' +
+      '<path d="M34 26 H56" fill="none" stroke="#e5484d" stroke-width="2.6" stroke-dasharray="5 4" stroke-linecap="round"/>' +
+      '<path d="M60 26 l-7 -3.5 v7 z" fill="#e5484d"/>' +
+      '<circle cx="70" cy="27" r="13" fill="none" stroke="#e5484d" stroke-width="2.4"/>' +
+      '<path d="M70 10 v8 M70 36 v8 M53 27 h8 M79 27 h8" stroke="#e5484d" stroke-width="2.4"/>' +
+      '<use href="#p-' + op + 'P" x="59" y="16" width="22" height="22"/>');
+  }
+  if (key === "mudanca") {
+    return V(miniBg(6, 40, 4, 20) +
+      '<use href="#p-' + op + 'N" x="12" y="10" width="26" height="26"/>' +
+      '<path d="M42 16 Q54 8 64 16" fill="none" stroke="#46c07a" stroke-width="2.6" stroke-linecap="round"/>' +
+      '<path d="M66 18 l-7 -2 l3 6z" fill="#46c07a"/>' +
+      '<path d="M64 34 Q52 42 42 34" fill="none" stroke="#46c07a" stroke-width="2.6" stroke-linecap="round"/>' +
+      '<path d="M40 32 l7 2 l-3 -6z" fill="#46c07a"/>' +
+      '<use href="#p-' + my + 'N" x="56" y="12" width="26" height="26"/>');
+  }
+  if (key === "sacrificio") {
+    return V(miniBg(6, 40, 4, 20) +
+      '<use href="#p-' + my + 'Q" x="32" y="8" width="30" height="30"/>' +
+      '<path d="M30 10 L64 40 M64 10 L30 40" stroke="#e5484d" stroke-width="4" stroke-linecap="round" opacity=".85"/>');
+  }
+  if (key === "atirador") {
+    return V(miniBg(6, 38, 4, 20) +
+      '<use href="#p-' + my + 'B" x="6" y="12" width="28" height="28"/>' +
+      '<path d="M34 25 H60" fill="none" stroke="#e5484d" stroke-width="2.6" stroke-dasharray="4 3" stroke-linecap="round"/>' +
+      star(66, 25, 8, 3.4, "#f0903c") +
+      '<use href="#p-' + op + 'P" x="62" y="16" width="20" height="20"/>');
+  }
+  if (key === "bomba") {
+    return V(miniBg(6, 40, 4, 20) +
+      star(46, 24, 22, 10, "#f0903c") + star(46, 24, 13, 6, "#f2cf63") +
+      '<use href="#p-' + my + 'R" x="32" y="10" width="28" height="28"/>');
+  }
+  if (key === "seguro") {
+    return V(miniBg(6, 40, 4, 20) +
+      '<circle cx="20" cy="24" r="12" fill="none" stroke="#8b6ce8" stroke-width="2.4" stroke-dasharray="4 4"/>' +
+      '<path d="M34 20 Q48 6 62 18" fill="none" stroke="#8b6ce8" stroke-width="2.6" stroke-dasharray="5 4" stroke-linecap="round"/>' +
+      '<path d="M64 20 l-7 -2.5 l2.5 6.5z" fill="#8b6ce8"/>' +
+      '<use href="#p-' + my + 'K" x="52" y="12" width="28" height="28"/>');
+  }
+  if (key === "mina") {
+    return V(miniBg(6, 38, 4, 20) + '<use href="#p-mine" x="30" y="6" width="34" height="34"/>');
+  }
+  if (key === "armadura") {
+    return V(miniBg(6, 40, 4, 20) +
+      '<circle cx="46" cy="24" r="18" fill="none" stroke="#f0903c" stroke-width="2.6" stroke-dasharray="3.5 5" stroke-linecap="round"/>' +
+      '<use href="#p-' + my + 'N" x="33" y="10" width="27" height="27"/>');
+  }
+  return V("");
+}
+
+/* ---------- mãos ---------- */
+function afford(col, key) {
+  return state.variant === "treino" || state.coins[col] >= CARD_COST[key];
+}
+function coinsTxt(col) {
+  return state.variant === "treino" ? "∞" : String(state.coins[col]);
+}
+// embaixo fica "a sua" mão (online: a sua cor; mesmo PC: a de quem joga agora)
+function bottomHandCol() {
+  if (mode === "local") return state.turn;
+  return myColor;
+}
+function renderHands() {
+  const bottom = bottomHandCol();
+  renderHand($("handTop"), enemy(bottom), false);
+  renderHand($("handBottom"), bottom, true);
+  renderDeck();
+}
+function renderHand(el, col, faceUp) {
+  const cards = state.cards[col];
+  const held = CARD_KEYS.filter(k => cards[k] > 0);
+  const mine = mode === "local" ? true : col === myColor;
+  const limit = state.variant === "treino" ? held.length : HAND_LIMIT;
+  el.innerHTML = "";
+  const label = document.createElement("div");
+  label.className = "handlabel";
+  let who = COLOR_PT[col];
+  if (mode !== "local") who += col === myColor ? " (você)" : " (oponente)";
+  label.innerHTML = "Cartas — " + who + " · " + held.length + "/" + limit +
+    ' · <span class="coins">🪙 ' + coinsTxt(col) + "</span>";
+  el.appendChild(label);
+
+  const slots = document.createElement("div");
+  slots.className = "slots";
+  if (faceUp) {
+    for (const key of held) {
+      const info = CARD_INFO[key];
+      const poor = !afford(col, key);
+      const card = document.createElement("div");
+      card.className = "card9" + (poor ? " poor" : "") +
+        (cardMode === key && state.turn === col ? " active" : "") +
+        (!poor && mine && state.turn === col && !state.over ? " playable" : "");
+      card.title = info.nome + " (" + CARD_COST[key] + " 🪙) — " + info.desc;
+      card.innerHTML =
+        '<div class="chead"><span class="cprice' + (poor ? " nofunds" : "") + '">🪙' +
+          (state.variant === "treino" ? "∞" : CARD_COST[key]) + "</span>" +
+        '<span class="cname">' + info.nome + "</span></div>" +
+        '<div class="cimg">' + cardArt(key, col) + "</div>" +
+        '<div class="cdesc">' + info.desc + "</div>";
+      if (mine) {
+        card.addEventListener("click", () => cardClicked(col, key));
+        card.addEventListener("pointerdown", (e) => cardPointerDown(e, col, key));
+      }
+      slots.appendChild(card);
+    }
+  } else {
+    for (let i = 0; i < held.length; i++) {
+      const back = document.createElement("div");
+      back.className = "card9 facedown";
+      back.title = mode === "local" ? "Carta do outro jogador (virada)" : "Carta secreta do oponente";
+      back.textContent = "🂠";
+      slots.appendChild(back);
+    }
+  }
+  for (let i = held.length; i < limit; i++) {
+    const emptySlot = document.createElement("div");
+    emptySlot.className = "slotempty";
+    emptySlot.title = "Espaço vazio";
+    slots.appendChild(emptySlot);
+  }
+  el.appendChild(slots);
+}
+
+function renderDeck() {
+  const pile = $("deckpile");
+  const n = state.variant === "treino" ? 0 : state.deck.length;
+  $("deckCount").textContent = state.variant === "treino" ? "—" : String(n);
+  const drawable = state.variant !== "treino" && n > 0 && myTurn() &&
+    handSize(state, state.turn) < HAND_LIMIT && !inCheck(state, state.turn);
+  pile.classList.toggle("nodraw", !drawable);
+}
+function tryDraw() {
+  if (!state || state.over || !myTurn()) return;
+  if (state.variant === "treino") { toast("No modo treino você já tem todas as cartas."); return; }
+  if (state.deck.length === 0) { toast("O monte acabou."); return; }
+  if (handSize(state, state.turn) >= HAND_LIMIT) { toast("Mão cheia: máximo de " + HAND_LIMIT + " cartas."); return; }
+  doAction({ kind: "draw" });
+}
+
+function overText(over) {
+  if (over.result === "mate") return "Xeque-mate! " + COLOR_PT[over.winner] + " vencem.";
+  if (over.result === "resign") return "🏳️ " + COLOR_PT[enemy(over.winner)] + " desistiram — " + COLOR_PT[over.winner] + " vencem.";
+  if (over.result === "draw") return "🤝 Empate acordado.";
+  return "Empate por afogamento.";
+}
+function renderStatus() {
+  const el = $("status");
+  let txt;
+  if (state.over) {
+    txt = overText(state.over);
+  } else {
+    txt = "Vez das " + COLOR_PT[state.turn];
+    if (mode !== "local") txt += state.turn === myColor ? " — sua vez!" : " — aguarde…";
+    if (inCheck(state, state.turn)) txt += "  ⚠️ XEQUE!";
+  }
+  el.textContent = txt;
+  el.className = state.over ? "over" : (inCheck(state, state.turn) ? "chk" : "");
+  const ri = $("roomInfo");
+  if (mode === "matched") {
+    ri.innerHTML = "🏅 Partida rankeada — " + (me ? "👤 " + me.nome + " (⭐" + me.rating + ")" : "você") +
+      " vs " + (opponent ? opponent.nome + " (⭐" + opponent.rating + ")" : "oponente");
+  }
+  else if (mode === "local") ri.textContent = state.variant === "treino" ? "🎓 Modo treino — todas as cartas, moedas infinitas" : "Modo: mesmo computador";
+  else ri.innerHTML = 'Sala <b>' + roomCodeDisplay() + '</b> <span class="dot ' + (connOn ? "on" : "off") + '"></span>' + (connOn ? " conectado" : " desconectado");
+}
+function roomCodeDisplay() { return roomCode || (conn ? conn.peer.replace(PEER_PREFIX, "") : "—"); }
+
+function renderLog() {
+  const el = $("log");
+  el.innerHTML = state.log.map(e =>
+    '<div class="logline"><span class="ln">' + e.n + ".</span> <span class=\"lc " + e.c + '">' +
+    (e.c === "w" ? "○" : "●") + "</span> " + e.txt + "</div>"
+  ).join("");
+  el.scrollTop = el.scrollHeight;
+}
+
+function showGameOver() {
+  const ov = $("overlay");
+  ov.hidden = false;
+  let title, sub;
+  if (state.over.result === "mate" || state.over.result === "resign") {
+    title = state.over.result === "mate" ? "Xeque-mate!" : "🏳️ Desistência";
+    sub = COLOR_PT[state.over.winner] + " vencem a partida.";
+    if (mode !== "local") sub += state.over.winner === myColor ? " 🏆 Você venceu!" : " Você perdeu.";
+  } else if (state.over.result === "draw") {
+    title = "🤝 Empate";
+    sub = "Os jogadores acordaram o empate.";
+  } else {
+    title = "Empate";
+    sub = "Afogamento — não há jogadas legais.";
+  }
+  if (mode === "matched" && ratingNote) sub += "  ·  " + ratingNote;
+  $("ovTitle").textContent = title;
+  $("ovSub").textContent = sub;
+}
+
+/* ---------- desistir e propor empate ---------- */
+function endBy(result, winner) {
+  if (!state || state.over) return;
+  state.over = { result: result, winner: winner || null };
+  state.log.push({ n: state.moveNum, c: state.turn, txt: result === "draw" ? "🤝 Empate acordado" : "🏳️ " + COLOR_PT[enemy(winner)] + " desistiram" });
+  clearSelection();
+  render();
+}
+function resignClicked() {
+  if (!state || state.over) return;
+  if (mode === "matched") {
+    if (confirm("Desistir da partida rankeada? Você perderá rating.")) sendGame({ t: "desistir" });
+  } else if (mode === "local") {
+    const who = state.turn;
+    if (confirm(COLOR_PT[who] + " desistem da partida?")) endBy("resign", enemy(who));
+  } else {
+    if (confirm("Desistir da partida?")) {
+      endBy("resign", enemy(myColor));
+      if (conn) conn.send({ type: "resign", by: myColor });
+    }
+  }
+}
+function offerDrawClicked() {
+  if (!state || state.over) return;
+  if (mode === "matched") { sendGame({ t: "empate-oferta" }); toast("Proposta de empate enviada."); }
+  else if (mode === "local") {
+    if (confirm(COLOR_PT[state.turn] + " propõem empate. O adversário aceita?")) endBy("draw", null);
+  } else {
+    if (conn && connOn) { conn.send({ type: "draw-offer" }); toast("Proposta de empate enviada."); }
+    else toast("Sem conexão com o oponente.");
+  }
+}
+
+function restart() {
+  if (mode === "matched") {
+    $("overlay").hidden = true;
+    if (state && !state.over) { toast("Partida rankeada não pode ser reiniciada — use Desistir."); return; }
+    showMenu();
+    renderAccount();
+    return;
+  }
+  const st = initialState(state && state.variant === "treino" ? "treino" : undefined);
+  clearSelection();
+  $("overlay").hidden = true;
+  if (conn) conn.send({ type: "restart", state: st });
+  startGame(st);
+}
+
+/* ---------- bootstrap ---------- */
+document.addEventListener("DOMContentLoaded", () => {
+  $("btnLocal").addEventListener("click", () => { mode = "local"; myColor = null; roomCode = ""; startGame(); });
+  $("btnTreino").addEventListener("click", () => { mode = "local"; myColor = null; roomCode = ""; startGame(initialState("treino")); });
+  $("btnHost").addEventListener("click", hostGame);
+  $("btnShowJoin").addEventListener("click", () => { $("joinPanel").hidden = false; $("hostPanel").hidden = true; $("joinCode").focus(); });
+  $("btnJoin").addEventListener("click", () => joinGame($("joinCode").value));
+  $("joinCode").addEventListener("keydown", (e) => { if (e.key === "Enter") joinGame($("joinCode").value); });
+  $("btnCopy").addEventListener("click", () => {
+    navigator.clipboard && navigator.clipboard.writeText($("hostCode").textContent).then(() => toast("Código copiado!"));
+  });
+  $("btnRestart").addEventListener("click", restart);
+  $("btnMenu").addEventListener("click", () => {
+    const rankedLive = mode === "matched" && state && !state.over;
+    if (confirm(rankedLive ? "Sair agora conta como DESISTÊNCIA da partida rankeada. Sair mesmo assim?" : "Sair da partida e voltar ao menu?")) {
+      if (rankedLive) sendGame({ t: "desistir" });
+      showMenu();
+      renderAccount();
+    }
+  });
+  $("btnResign").addEventListener("click", resignClicked);
+  $("btnOfferDraw").addEventListener("click", offerDrawClicked);
+  $("deckpile").addEventListener("click", tryDraw);
+  $("ovRestart").addEventListener("click", restart);
+  $("ovClose").addEventListener("click", () => { $("overlay").hidden = true; });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      if (pendingPromo) { closePromo(); }
+      clearSelection();
+      if (state) render();
+    }
+  });
+  $("promoModal").addEventListener("click", (e) => {
+    if (e.target === $("promoModal")) { closePromo(); clearSelection(); render(); }
+  });
+  document.addEventListener("pointermove", onPointerMove);
+  document.addEventListener("pointerup", onPointerUp);
+  document.addEventListener("pointercancel", onPointerUp);
+  // conta Chesstable
+  if (SERVER) {
+    $("tabLogin").addEventListener("click", () => { $("formLogin").hidden = false; $("formReg").hidden = true; $("tabLogin").classList.add("on"); $("tabReg").classList.remove("on"); });
+    $("tabReg").addEventListener("click", () => { $("formLogin").hidden = true; $("formReg").hidden = false; $("tabReg").classList.add("on"); $("tabLogin").classList.remove("on"); });
+    $("btnReg").addEventListener("click", doRegister);
+    $("btnLogin").addEventListener("click", doLogin);
+    $("liSenha").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
+    $("btnLogout").addEventListener("click", doLogout);
+    $("btnBuscar").addEventListener("click", buscarClicked);
+  }
+  showMenu();
+  tryResume();
+});
+
+</script>
+</body>
+</html>

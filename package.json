@@ -1,0 +1,8 @@
+{
+  "name": "chesstable",
+  "version": "1.0.0",
+  "description": "Xadrez com cartas, moedas, matchmaking e rating",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=16" }
+}

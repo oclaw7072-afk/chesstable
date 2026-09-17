@@ -1,0 +1,10 @@
+{
+  "baseUrl": "https://chesstable.com.br",
+  "smtp": {
+    "host": "smtp-relay.brevo.com",
+    "port": 465,
+    "user": "SEU_USUARIO_SMTP",
+    "pass": "SUA_SENHA_SMTP",
+    "from": "Chesstable <no-reply@chesstable.com.br>"
+  }
+}
