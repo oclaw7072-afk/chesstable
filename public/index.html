@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chesstable — xadrez com cartas</title>
+<title>ChessTable — xadrez com cartas</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js"></script>
 <style>
 :root{
@@ -206,7 +206,7 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
 </svg>
 <div id="ghost" hidden></div>
 <header>
-  <h1>♞ Chesstable</h1>
+  <h1>♞ Chess<span class="gold">Table</span></h1>
   <p>Xadrez clássico + cartas especiais, moedas e explosões</p>
 </header>
 
@@ -1093,7 +1093,7 @@ let pendingPromo = null; // {from, to}
 
 const $ = (id) => document.getElementById(id);
 
-/* ---------- conta / servidor Chesstable ---------- */
+/* ---------- conta / servidor ChessTable ---------- */
 const SERVER = location.protocol === "http:" || location.protocol === "https:";
 let authToken = null;
 try { authToken = localStorage.getItem("ct_token"); } catch (e) {}
@@ -1113,7 +1113,7 @@ function api(p, body) {
 function acctMsg(html) { $("acctMsg").innerHTML = html; }
 function renderAccount() {
   if (!SERVER) {
-    $("accountCard").innerHTML = "<h2>♞ Sua conta</h2><div class='small'>Contas, busca de partida e rating funcionam quando o jogo roda no servidor Chesstable (node server.js) — veja o README. Os modos abaixo funcionam normalmente.</div>";
+    $("accountCard").innerHTML = "<h2>♞ Sua conta</h2><div class='small'>Contas, busca de partida e rating funcionam quando o jogo roda no servidor ChessTable (node server.js) — veja o README. Os modos abaixo funcionam normalmente.</div>";
     return;
   }
   $("acctLogged").hidden = !me;
@@ -1992,7 +1992,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("pointermove", onPointerMove);
   document.addEventListener("pointerup", onPointerUp);
   document.addEventListener("pointercancel", onPointerUp);
-  // conta Chesstable
+  // conta ChessTable
   if (SERVER) {
     $("tabLogin").addEventListener("click", () => { $("formLogin").hidden = false; $("formReg").hidden = true; $("tabLogin").classList.add("on"); $("tabReg").classList.remove("on"); });
     $("tabReg").addEventListener("click", () => { $("formLogin").hidden = true; $("formReg").hidden = false; $("tabReg").classList.add("on"); $("tabLogin").classList.remove("on"); });
