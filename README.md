@@ -1,4 +1,4 @@
-# ♞ Chesstable
+# ♞ ChessTable
 
 Xadrez com cartas especiais, moedas, maço de compra, contas com confirmação por
 e-mail, busca de partida online (matchmaking) e rating estilo chess.com (Glicko).
@@ -53,6 +53,17 @@ igual no Railway, Fly.io ou qualquer VPS):
    confirmação de e-mail usem o domínio final.
 
 ### E-mails de verdade (link de confirmação)
+
+**No Render (plano grátis)** as portas SMTP são bloqueadas, então use a API HTTPS
+da Brevo (300 e-mails/dia grátis). Em **Environment** do serviço, defina:
+
+| Variável | Valor |
+|---|---|
+| `BREVO_API_KEY` | chave criada em Brevo → SMTP & API → API Keys |
+| `MAIL_FROM` | `ChessTable <remetente-verificado@...>` (remetente verificado na Brevo) |
+| `BASE_URL` | `https://chesstable.onrender.com` (ou seu domínio) |
+
+**Fora do Render ou em plano pago**, também dá para usar SMTP direto:
 
 Copie `config.example.json` para `config.json` e preencha um SMTP:
 
