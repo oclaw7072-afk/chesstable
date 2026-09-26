@@ -300,35 +300,55 @@ function wsParse(sock, onMsg, onClose) {
   sock.on("error", onClose);
 }
 
-/* ---------------- matchmaking e partidas ---------------- */
-let fila = [];              // [{nome, sock}]
-const online = new Map();   // nome -> {sock, gameId}
-const jogos = new Map();    // id -> {id, w, b, state}
 
-function tiraDaFila(nome) { fila = fila.filter(f => f.nome !== nome); }
+/* ---------------- matchmaking por formato de tempo e partidas ---------------- */
+const TCS = [60, 180, 600];                  // formatos: 1, 3 e 10 minutos
+const filas = { 60: [], 180: [], 600: [] };  // uma fila por formato
+const online = new Map();                    // nome -> {sock, gameId}
+const jogos = new Map();                     // id -> {id, w, b, state, tc, clock, lastTick, timer}
 
-function criaJogo(a, b) {
+function tiraDaFila(nome) {
+  for (const tc of TCS) filas[tc] = filas[tc].filter(f => f.nome !== nome);
+}
+
+function armaRelogio(g) {
+  clearTimeout(g.timer);
+  if (g.state.over) return;
+  const cur = g.state.turn;
+  g.timer = setTimeout(() => {
+    if (g.state.over || !jogos.has(g.id)) return;
+    g.clock[cur] = 0;
+    fimDeJogo(g, cur === "w" ? 0 : 1, "tempo"); // quem estourou o tempo perde
+  }, Math.max(0, g.clock[cur]) + 60);
+}
+
+function criaJogo(a, b, tc) {
   const brancoPrimeiro = Math.random() < 0.5;
   const wn = brancoPrimeiro ? a.nome : b.nome;
   const bn = brancoPrimeiro ? b.nome : a.nome;
   const id = crypto.randomBytes(8).toString("hex");
   const state = E.initialState();
-  jogos.set(id, { id, w: wn, b: bn, state });
+  const g = { id, w: wn, b: bn, state, tc,
+    clock: { w: tc * 1000, b: tc * 1000 }, lastTick: Date.now(), timer: null };
+  jogos.set(id, g);
   online.get(wn).gameId = id;
   online.get(bn).gameId = id;
   const uw = pubUser(db.users[userKey(wn)]), ub = pubUser(db.users[userKey(bn)]);
-  wsSend(online.get(wn).sock, { t: "match", state, cor: "w", oponente: ub });
-  wsSend(online.get(bn).sock, { t: "match", state, cor: "b", oponente: uw });
-  console.log("[partida]", wn, "(brancas) x", bn, "(pretas)");
+  wsSend(online.get(wn).sock, { t: "match", state, cor: "w", oponente: ub, tc, clock: g.clock });
+  wsSend(online.get(bn).sock, { t: "match", state, cor: "b", oponente: uw, tc, clock: g.clock });
+  armaRelogio(g);
+  console.log("[partida " + tc + "s]", wn, "(brancas) x", bn, "(pretas)");
 }
 
 function fimDeJogo(g, sWhite, motivo) {
+  clearTimeout(g.timer);
   const ratings = applyResult(g.w, g.b, sWhite);
-  for (const [nome, cor] of [[g.w, "w"], [g.b, "b"]]) {
+  for (const par of [[g.w, "w"], [g.b, "b"]]) {
+    const nome = par[0], cor = par[1];
     const o = online.get(nome);
     if (o) {
       o.gameId = null;
-      wsSend(o.sock, { t: "fim", motivo, sWhite, cor, ratings,
+      wsSend(o.sock, { t: "fim", motivo, sWhite, cor, ratings, clock: g.clock,
         usuario: pubUser(db.users[userKey(nome)]) });
     }
   }
@@ -370,11 +390,14 @@ server.on("upgrade", (req, sock) => {
 
     if (m.t === "buscar") {
       if (o.gameId) return;
-      if (!fila.some(f => f.nome === nome)) fila.push({ nome, sock });
-      wsSend(sock, { t: "na-fila" });
-      if (fila.length >= 2) {
-        const a = fila.shift(), b = fila.shift();
-        criaJogo(a, b);
+      const tc = parseInt(m.tc, 10);
+      if (TCS.indexOf(tc) < 0) return wsSend(sock, { t: "erro", erro: "Formato de tempo inválido." });
+      tiraDaFila(nome); // troca de fila se já estava em outra
+      filas[tc].push({ nome, sock });
+      wsSend(sock, { t: "na-fila", tc });
+      if (filas[tc].length >= 2) {
+        const a = filas[tc].shift(), b = filas[tc].shift();
+        criaJogo(a, b, tc);
       }
       return;
     }
@@ -387,14 +410,22 @@ server.on("upgrade", (req, sock) => {
     const opSock = online.get(opNome) && online.get(opNome).sock;
 
     if (m.t === "action") {
-      if (g.state.turn !== minhaCor) return wsSend(sock, { t: "invalido", state: g.state });
+      if (g.state.turn !== minhaCor) return wsSend(sock, { t: "invalido", state: g.state, clock: g.clock });
+      // desconta o tempo gasto no lance
+      const agora = Date.now();
+      g.clock[minhaCor] -= (agora - g.lastTick);
+      if (g.clock[minhaCor] <= 0) { g.clock[minhaCor] = 0; return fimDeJogo(g, minhaCor === "w" ? 0 : 1, "tempo"); }
       const r = E.applyAction(g.state, m.action);
-      if (!r.ok) return wsSend(sock, { t: "invalido", state: g.state });
-      wsSend(opSock, { t: "action", action: m.action });
+      if (!r.ok) { g.lastTick = agora; armaRelogio(g); return wsSend(sock, { t: "invalido", state: g.state, clock: g.clock }); }
+      g.lastTick = agora;
+      wsSend(opSock, { t: "action", action: m.action, clock: g.clock });
+      wsSend(sock, { t: "clock", clock: g.clock });
       if (g.state.over) {
         const ov = g.state.over;
         fimDeJogo(g, ov.result === "mate" ? (ov.winner === "w" ? 1 : 0) : 0.5,
           ov.result === "mate" ? "xeque-mate" : "afogamento");
+      } else {
+        armaRelogio(g);
       }
       return;
     }
@@ -408,6 +439,6 @@ server.on("upgrade", (req, sock) => {
 server.listen(PORT, () => {
   console.log("♞ ChessTable rodando em http://localhost:" + PORT);
   console.log(DEV_MAIL
-    ? "✉️  SMTP não configurado: modo demonstração (o link de confirmação aparece na tela e no console)."
+    ? "✉️  E-mail não configurado: modo demonstração (o link de confirmação aparece na tela e no console)."
     : "✉️  E-mail configurado (" + (MAIL_WEBHOOK ? "Gmail via Apps Script" : BREVO_KEY ? "API Brevo" : "SMTP") + "): confirmações serão enviadas de verdade.");
 });
