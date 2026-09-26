@@ -51,6 +51,14 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
 #rankingBox td{padding:2.5px 4px; border-bottom:1px solid #353052}
 #rankingBox td.rt{text-align:right; color:var(--accent); font-weight:800}
 #acctMsg a{color:var(--accent2); font-weight:700}
+#tcPicker{margin-top:6px; padding:14px; background:#221f35; border-radius:12px; border:1px dashed #4a4470}
+#tcPicker .tclabel{text-align:center; font-size:13px; color:var(--muted); margin-bottom:10px; font-weight:700}
+.tcrow{display:flex; gap:8px}
+.tcbtn{flex:1; padding:14px 6px; border:2px solid #55498a; border-radius:12px; background:var(--panel2); color:var(--ink);
+  font-weight:800; font-size:15px; cursor:pointer; text-align:center; transition:transform .08s, border-color .15s}
+.tcbtn:hover{transform:translateY(-2px); border-color:var(--accent2)}
+.tcbtn .big{display:block; font-size:22px}
+.tcbtn .sub{display:block; font-size:10.5px; color:var(--muted); font-weight:600; margin-top:2px}
 .rules{font-size:13px; color:var(--muted); line-height:1.55}
 .rules b{color:var(--ink)}
 
@@ -111,6 +119,10 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
 .dot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-left:4px}
 .dot.on{background:var(--ok)} .dot.off{background:var(--danger)}
 .coins{color:var(--accent); font-weight:800}
+.clock{display:inline-block; margin-left:8px; padding:1px 9px; border-radius:7px; background:#191627; border:1.5px solid #4a4470;
+  font-family:ui-monospace,monospace; font-size:13px; font-weight:900; color:var(--ink)}
+.clock.active{border-color:var(--accent); color:var(--accent)}
+.clock.low{border-color:var(--danger); color:#ffb4b6}
 
 .handrow{background:var(--panel); border:1px solid #403b5e; border-radius:12px; padding:8px 10px}
 .handlabel{font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin-bottom:6px}
@@ -162,7 +174,16 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
 .ln{color:var(--muted); font-family:ui-monospace,monospace}
 .lc.w{color:#fff} .lc.b{color:#9a92c2}
 
-/* ---------- overlay / toast ---------- */
+/* ---------- oferta de empate ---------- */
+#drawOffer{position:fixed; bottom:84px; left:50%; transform:translateX(-50%); z-index:70;
+  background:var(--panel); border:2px solid var(--accent2); border-radius:14px; padding:14px 18px; text-align:center;
+  box-shadow:0 14px 40px rgba(0,0,0,.6)}
+#drawOffer .doTitle{font-weight:800; margin-bottom:10px}
+#drawOffer .row button{flex:1; padding:9px 18px; border:none; border-radius:10px; font-weight:800; font-size:14px; cursor:pointer}
+#btnDrawYes{background:linear-gradient(135deg,#46c07a,#2c8f57); color:#fff}
+#btnDrawNo{background:var(--panel2); color:var(--ink); border:1px solid #4a4470}
+
+/* ---------- overlay / promo / toast ---------- */
 #overlay,#promoModal{position:fixed; inset:0; background:rgba(12,10,20,.75); display:flex; align-items:center; justify-content:center; z-index:50}
 #promoChoices{display:flex; gap:10px; justify-content:center}
 .promobtn{width:76px; height:76px; border-radius:14px; border:2px solid #55498a; background:linear-gradient(160deg,#3b3560,#2a2545);
@@ -216,6 +237,14 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
     <div id="acctLogged" hidden>
       <div id="acctInfo" class="acctinfo"></div>
       <button class="bigbtn" id="btnBuscar">🔎 Buscar partida (rankeada)</button>
+      <div id="tcPicker" hidden>
+        <div class="tclabel">Escolha o formato de tempo da partida:</div>
+        <div class="tcrow">
+          <button class="tcbtn" data-tc="60"><span class="big">⚡</span>1 min<span class="sub">bullet</span></button>
+          <button class="tcbtn" data-tc="180"><span class="big">🔥</span>3 min<span class="sub">blitz</span></button>
+          <button class="tcbtn" data-tc="600"><span class="big">⏱️</span>10 min<span class="sub">rápida</span></button>
+        </div>
+      </div>
       <div id="queueStatus" class="small" style="text-align:center; min-height:18px"></div>
       <button class="bigbtn ghost" id="btnLogout">Sair da conta</button>
     </div>
@@ -271,10 +300,11 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
       <b>💣 Torre Bomba</b> — quando essa torre capturar — ou <b>for capturada</b> — explode a si e todas as casas vizinhas, e a explosão <b>pode matar reis</b>: ninguém pode causar uma explosão de bomba com o próprio rei no raio (capturar a bomba com seu rei do lado não salva do xeque!). Se ela puder capturar algo ao lado do rei inimigo, é <b>xeque</b>.<br>
       <b>🛟 Seguro do Rei</b> — teletransporta seu rei para qualquer casa vazia.<br>
       <b>💥 Mina Terrestre</b> — mina visível numa casa vazia: quem parar nela explode junto com os vizinhos, e ela <b>pode explodir reis</b>! Peças <b>não atravessam</b> a mina, ninguém pode detonar uma mina com o <b>próprio rei no raio</b> (nem o rei pode pisar nela), e um rei no alcance de uma mina detonável pelo inimigo está em <b>xeque</b>.<br>
-      <b>🛡️ Armadura de Espinhos</b> — a peça não pode ser capturada: quem tentar, morre e a armadura quebra (Golpe à Distância e Bispo Atirador quebram só a armadura). Atenção: uma <b>torre bomba morta nos espinhos ainda explode</b> — armadura numa peça vizinha do rei não desfaz o xeque da bomba! Não vale para o rei.<br><br>
-      <b>🪙 Moedas</b> — cada carta tem um custo (mostrado na carta; base: Invocar Cavalo = 27). Você começa com <b>50 moedas</b> e ganha <b>+5 a cada lance</b> seu. Sem moedas suficientes, a carta não pode ser jogada — nem para escapar de um xeque!<br>
-      <b>🎴 Mão e monte</b> — cada jogador recebe <b>3 cartas sorteadas</b> (sem repetição entre os dois) e as 11 restantes formam o <b>monte</b>. No seu turno você escolhe UMA ação: <b>mover uma peça</b>, <b>usar uma carta</b> ou <b>comprar 1 carta do monte</b> (grátis, mas só com menos de <b>5 cartas</b> na mão e fora de xeque; a carta comprada sai do monte para sempre). A mão do adversário fica <b>virada para baixo</b>. Há também os botões <b>🏳️ desistir</b> e <b>🤝 propor empate</b>. No <b>🎓 modo treino</b>, ambos têm todas as 17 cartas e moedas infinitas.<br><br>
-      Cada peça pode carregar <b>no máximo UM efeito</b> (estilo, atirador, bomba ou armadura) — se a armadura quebrar, a vaga fica livre de novo. Reis e pedras <b>sobrevivem a explosões</b> (mas minas e bombas <b>podem matar reis</b> — veja acima). Peão promovido <b>escolhe</b> entre dama, torre, bispo e cavalo. Usar uma carta <b>gasta o seu turno</b> e cada uma vale <b>uma vez</b> por partida. Você pode <b>clicar ou arrastar</b> peças e cartas; clicar de novo desseleciona. Só é xeque-mate se nem as cartas salvarem!
+      <b>🛡️ Armadura de Espinhos</b> — a peça não pode ser capturada: quem tentar, morre e a armadura quebra (Golpe à Distância e Bispo Atirador quebram só a armadura). Atenção: uma <b>torre bomba morta nos espinhos ainda explode</b>! Não vale para o rei.<br><br>
+      <b>🪙 Moedas</b> — cada carta tem um custo (base: Invocar Cavalo = 27). Você começa com <b>50 moedas</b> e ganha <b>+5 a cada lance</b>. Sem moedas, a carta não pode ser jogada — nem para escapar de xeque!<br>
+      <b>🎴 Mão e monte</b> — cada jogador recebe <b>3 cartas sorteadas</b> (sem repetição entre os dois) e as 11 restantes formam o <b>monte</b>. No seu turno: <b>mover</b>, <b>usar carta</b> ou <b>comprar 1 do monte</b> (grátis, com menos de <b>5 cartas</b> na mão e fora de xeque). A mão do adversário fica <b>virada</b>.<br>
+      <b>⏰ Rankeadas</b> — escolha <b>1, 3 ou 10 minutos</b>; você só enfrenta quem escolheu o mesmo formato, e o tempo esgotado é <b>derrota</b>.<br><br>
+      Cada peça pode carregar <b>no máximo UM efeito</b>. Reis e pedras sobrevivem a explosões (mas minas e bombas <b>podem matar reis</b> — veja acima). Peão promovido <b>escolhe</b> a peça. Só é xeque-mate se nem as cartas salvarem!
     </div>
   </div>
 </div>
@@ -306,6 +336,14 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
       </div>
     </div>
     <div class="handrow" id="handBottom"></div>
+  </div>
+</div>
+
+<div id="drawOffer" hidden>
+  <div class="doTitle">🤝 O oponente propõe empate</div>
+  <div class="row">
+    <button id="btnDrawYes">Aceitar</button>
+    <button id="btnDrawNo">Recusar</button>
   </div>
 </div>
 
@@ -1059,7 +1097,7 @@ if (typeof module !== "undefined" && module.exports) {
 </script>
 <script>
 /* ============================================================
-   Xadrez com Cartas — Interface + Multiplayer (PeerJS)
+   ChessTable — Interface + Multiplayer
    Peças: conjunto SVG "staunty" (lichess, licença aberta)
    ============================================================ */
 "use strict";
@@ -1067,6 +1105,7 @@ if (typeof module !== "undefined" && module.exports) {
 const COLOR_PT = { w: "Brancas", b: "Pretas" };
 const PEER_PREFIX = "xzcartas26-";
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const TC_LABEL = { 60: "⚡ 1 min", 180: "🔥 3 min", 600: "⏱️ 10 min" };
 
 let state = null;
 let mode = null;          // 'local' | 'host' | 'guest' | 'matched'
@@ -1081,7 +1120,7 @@ let fxSeen = 0;
 // seleção
 let sel = null;
 let selDests = [];
-let cardMode = null;      // chave da carta ativa
+let cardMode = null;
 let cardTargetsUI = [];
 
 // drag & drop
@@ -1089,7 +1128,7 @@ let drag = null;
 let suppressClick = false;
 
 // promoção pendente
-let pendingPromo = null; // {from, to}
+let pendingPromo = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -1097,11 +1136,20 @@ const $ = (id) => document.getElementById(id);
 const SERVER = location.protocol === "http:" || location.protocol === "https:";
 let authToken = null;
 try { authToken = localStorage.getItem("ct_token"); } catch (e) {}
-let me = null;            // usuário logado
-let ws = null;            // WebSocket do servidor
+let me = null;
+let ws = null;
 let searching = false;
-let opponent = null;      // {nome, rating} na partida rankeada
-let ratingNote = "";      // "1200 → 1215" para a tela de fim
+let searchTC = 0;         // formato escolhido (segundos)
+let pendingSearchTC = 0;  // buscar assim que autenticar
+let opponent = null;
+let matchTC = 0;
+let ratingNote = "";
+// relógios (partida rankeada)
+let clocks = null;        // {w: ms, b: ms}
+let clockSyncAt = 0;
+let clockTicker = null;
+// oferta de empate recebida
+let drawFrom = null;      // 'matched' | 'p2p'
 
 function api(p, body) {
   return fetch(p, {
@@ -1113,7 +1161,7 @@ function api(p, body) {
 function acctMsg(html) { $("acctMsg").innerHTML = html; }
 function renderAccount() {
   if (!SERVER) {
-    $("accountCard").innerHTML = "<h2>♞ Sua conta</h2><div class='small'>Contas, busca de partida e rating funcionam quando o jogo roda no servidor ChessTable (node server.js) — veja o README. Os modos abaixo funcionam normalmente.</div>";
+    $("accountCard").innerHTML = "<h2>♞ Sua conta</h2><div class='small'>Contas, busca de partida e rating funcionam quando o jogo roda no servidor ChessTable (node server.js). Os modos abaixo funcionam normalmente.</div>";
     return;
   }
   $("acctLogged").hidden = !me;
@@ -1158,7 +1206,7 @@ function doLogin() {
 }
 function doLogout() {
   api("/api/sair", {}).catch(() => {});
-  authToken = null; me = null; searching = false;
+  authToken = null; me = null; searching = false; searchTC = 0;
   try { localStorage.removeItem("ct_token"); } catch (e) {}
   if (ws) { try { ws.close(); } catch (e) {} ws = null; }
   renderAccount();
@@ -1171,29 +1219,39 @@ function connectWS() {
   ws.onclose = () => { if (searching) { searching = false; setQueueUI(); } };
   ws.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
-    if (m.t === "authed") { me = m.usuario; renderAccount(); if (searching) ws.send(JSON.stringify({ t: "buscar" })); }
+    if (m.t === "authed") {
+      me = m.usuario; renderAccount();
+      if (pendingSearchTC) { ws.send(JSON.stringify({ t: "buscar", tc: pendingSearchTC })); pendingSearchTC = 0; }
+    }
     else if (m.t === "erro") { toast(m.erro); }
-    else if (m.t === "na-fila") { searching = true; setQueueUI(); }
+    else if (m.t === "na-fila") { searching = true; searchTC = m.tc || searchTC; setQueueUI(); }
     else if (m.t === "fora-da-fila") { searching = false; setQueueUI(); }
     else if (m.t === "match") {
       searching = false; setQueueUI();
       mode = "matched"; myColor = m.cor; opponent = m.oponente; roomCode = ""; ratingNote = "";
+      matchTC = m.tc || 0;
+      clocks = m.clock ? { w: m.clock.w, b: m.clock.b } : null;
+      clockSyncAt = Date.now();
+      startClockTicker();
       startGame(m.state);
-      toast("Partida encontrada! Você joga de " + COLOR_PT[myColor] + " contra " + opponent.nome + " (⭐" + opponent.rating + ").");
+      toast("Partida encontrada (" + (TC_LABEL[matchTC] || "") + ")! Você joga de " + COLOR_PT[myColor] + " contra " + opponent.nome + " (⭐" + opponent.rating + ").");
     }
     else if (m.t === "action") {
       const res = applyAction(state, m.action);
+      if (m.clock) { clocks = m.clock; clockSyncAt = Date.now(); }
       if (res.ok) { clearSelection(); render(); if (res.check && state.turn === myColor && !state.over) toast("Xeque!"); }
     }
-    else if (m.t === "invalido") { state = m.state; clearSelection(); render(); toast("Jogada rejeitada pelo servidor — tabuleiro sincronizado."); }
-    else if (m.t === "empate-oferta") {
-      if (confirm("O oponente propõe empate. Aceitar?")) ws.send(JSON.stringify({ t: "empate-aceite" }));
-      else ws.send(JSON.stringify({ t: "empate-recusa" }));
-    }
+    else if (m.t === "clock") { clocks = m.clock; clockSyncAt = Date.now(); renderClocks(); }
+    else if (m.t === "invalido") { state = m.state; if (m.clock) { clocks = m.clock; clockSyncAt = Date.now(); } clearSelection(); render(); toast("Jogada rejeitada pelo servidor — tabuleiro sincronizado."); }
+    else if (m.t === "empate-oferta") { showDrawOffer("matched"); }
     else if (m.t === "empate-recusa") { toast("O oponente recusou o empate."); }
     else if (m.t === "fim") {
+      hideDrawOffer();
+      stopClockTicker();
+      if (m.clock) { clocks = m.clock; clockSyncAt = Date.now(); }
       if (state && !state.over) {
         if (m.motivo === "empate-acordado") state.over = { result: "draw", winner: null };
+        else if (m.motivo === "tempo") state.over = { result: "tempo", winner: m.sWhite === 1 ? "w" : "b" };
         else if (m.motivo === "desistencia" || m.motivo === "abandono") state.over = { result: "resign", winner: m.sWhite === 1 ? "w" : "b" };
       }
       const r = m.cor === "w" ? m.ratings.w : m.ratings.b;
@@ -1206,16 +1264,79 @@ function connectWS() {
   };
 }
 function setQueueUI() {
-  $("queueStatus").textContent = searching ? "🔎 Procurando oponente… (deixe esta tela aberta)" : "";
+  $("queueStatus").textContent = searching
+    ? "🔎 Procurando oponente de " + (TC_LABEL[searchTC] || "") + "… (deixe esta tela aberta)"
+    : "";
   $("btnBuscar").textContent = searching ? "✋ Cancelar busca" : "🔎 Buscar partida (rankeada)";
+  if (searching) $("tcPicker").hidden = true;
 }
 function buscarClicked() {
   if (!me) return;
-  if (!ws || ws.readyState !== 1) { connectWS(); searching = true; setQueueUI(); return; }
-  if (searching) { ws.send(JSON.stringify({ t: "cancelar-busca" })); }
-  else { ws.send(JSON.stringify({ t: "buscar" })); }
+  if (searching) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: "cancelar-busca" }));
+    searching = false; setQueueUI();
+    return;
+  }
+  $("tcPicker").hidden = !$("tcPicker").hidden; // abre a tela de escolha de formato
+}
+function startSearch(tc) {
+  $("tcPicker").hidden = true;
+  searchTC = tc;
+  if (!ws || ws.readyState !== 1) { pendingSearchTC = tc; connectWS(); searching = true; setQueueUI(); return; }
+  ws.send(JSON.stringify({ t: "buscar", tc: tc }));
 }
 function sendGame(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+
+/* ---------- relógios ---------- */
+function fmtClock(ms) {
+  ms = Math.max(0, ms);
+  const s = Math.ceil(ms / 1000);
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+function clockNow(col) {
+  if (!clocks) return 0;
+  let v = clocks[col];
+  if (state && !state.over && state.turn === col) v -= (Date.now() - clockSyncAt);
+  return v;
+}
+function renderClocks() {
+  if (!clocks || mode !== "matched") return;
+  for (const col of ["w", "b"]) {
+    const el = $("clock-" + col);
+    if (!el) continue;
+    const v = clockNow(col);
+    el.textContent = "⏰ " + fmtClock(v);
+    el.classList.toggle("active", !!state && !state.over && state.turn === col);
+    el.classList.toggle("low", v < 15000);
+  }
+}
+function startClockTicker() {
+  stopClockTicker();
+  clockTicker = setInterval(renderClocks, 250);
+}
+function stopClockTicker() {
+  if (clockTicker) { clearInterval(clockTicker); clockTicker = null; }
+}
+
+/* ---------- oferta de empate (painel na tela do adversário) ---------- */
+function showDrawOffer(from) {
+  drawFrom = from;
+  $("drawOffer").hidden = false;
+}
+function hideDrawOffer() {
+  drawFrom = null;
+  $("drawOffer").hidden = true;
+}
+function drawAnswer(aceita) {
+  const from = drawFrom;
+  hideDrawOffer();
+  if (from === "matched") {
+    sendGame({ t: aceita ? "empate-aceite" : "empate-recusa" });
+  } else if (from === "p2p" && conn) {
+    if (aceita) { conn.send({ type: "draw-accept" }); endBy("draw", null); }
+    else conn.send({ type: "draw-decline" });
+  }
+}
 
 /* ---------- helpers ---------- */
 function pieceSvg(p) {
@@ -1267,6 +1388,9 @@ function showMenu() {
   $("overlay").hidden = true;
   $("hostPanel").hidden = true;
   $("joinPanel").hidden = true;
+  hideDrawOffer();
+  stopClockTicker();
+  clocks = null;
   if (peer) { try { peer.destroy(); } catch (e) {} peer = null; conn = null; connOn = false; }
 }
 function startGame(st) {
@@ -1277,10 +1401,11 @@ function startGame(st) {
   $("menu").hidden = true;
   $("game").hidden = false;
   $("overlay").hidden = true;
+  hideDrawOffer();
   render();
 }
 
-/* ---------- rede ---------- */
+/* ---------- rede P2P (sala com código) ---------- */
 function genCode() {
   let c = "";
   for (let i = 0; i < 5; i++) c += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
@@ -1366,12 +1491,7 @@ function onMsg(msg) {
     endBy("resign", enemy(msg.by));
     toast("O oponente desistiu da partida.");
   } else if (msg.type === "draw-offer") {
-    if (confirm("O oponente propõe empate. Aceitar?")) {
-      endBy("draw", null);
-      conn.send({ type: "draw-accept" });
-    } else {
-      conn.send({ type: "draw-decline" });
-    }
+    showDrawOffer("p2p");
   } else if (msg.type === "draw-accept") {
     endBy("draw", null);
     toast("O oponente aceitou o empate.");
@@ -1657,6 +1777,8 @@ function render() {
   renderHands();
   renderStatus();
   renderLog();
+  renderClocks();
+  if (state.over) hideDrawOffer();
   if (state.over && !overShown) { overShown = true; showGameOver(); }
   if (!state.over) overShown = false;
 }
@@ -1767,7 +1889,6 @@ function afford(col, key) {
 function coinsTxt(col) {
   return state.variant === "treino" ? "∞" : String(state.coins[col]);
 }
-// embaixo fica "a sua" mão (online: a sua cor; mesmo PC: a de quem joga agora)
 function bottomHandCol() {
   if (mode === "local") return state.turn;
   return myColor;
@@ -1787,9 +1908,10 @@ function renderHand(el, col, faceUp) {
   const label = document.createElement("div");
   label.className = "handlabel";
   let who = COLOR_PT[col];
-  if (mode !== "local") who += col === myColor ? " (você)" : " (oponente)";
+  if (mode !== "local") who += col === myColor ? " (você)" : (mode === "matched" && opponent ? " — " + opponent.nome : " (oponente)");
   label.innerHTML = "Cartas — " + who + " · " + held.length + "/" + limit +
-    ' · <span class="coins">🪙 ' + coinsTxt(col) + "</span>";
+    ' · <span class="coins">🪙 ' + coinsTxt(col) + "</span>" +
+    (mode === "matched" && clocks ? ' <span class="clock" id="clock-' + col + '"></span>' : "");
   el.appendChild(label);
 
   const slots = document.createElement("div");
@@ -1852,6 +1974,7 @@ function tryDraw() {
 function overText(over) {
   if (over.result === "mate") return "Xeque-mate! " + COLOR_PT[over.winner] + " vencem.";
   if (over.result === "resign") return "🏳️ " + COLOR_PT[enemy(over.winner)] + " desistiram — " + COLOR_PT[over.winner] + " vencem.";
+  if (over.result === "tempo") return "⏰ Tempo esgotado — " + COLOR_PT[over.winner] + " vencem.";
   if (over.result === "draw") return "🤝 Empate acordado.";
   return "Empate por afogamento.";
 }
@@ -1869,7 +1992,7 @@ function renderStatus() {
   el.className = state.over ? "over" : (inCheck(state, state.turn) ? "chk" : "");
   const ri = $("roomInfo");
   if (mode === "matched") {
-    ri.innerHTML = "🏅 Partida rankeada — " + (me ? "👤 " + me.nome + " (⭐" + me.rating + ")" : "você") +
+    ri.innerHTML = "🏅 Rankeada " + (TC_LABEL[matchTC] || "") + " — " + (me ? "👤 " + me.nome + " (⭐" + me.rating + ")" : "você") +
       " vs " + (opponent ? opponent.nome + " (⭐" + opponent.rating + ")" : "oponente");
   }
   else if (mode === "local") ri.textContent = state.variant === "treino" ? "🎓 Modo treino — todas as cartas, moedas infinitas" : "Modo: mesmo computador";
@@ -1890,8 +2013,8 @@ function showGameOver() {
   const ov = $("overlay");
   ov.hidden = false;
   let title, sub;
-  if (state.over.result === "mate" || state.over.result === "resign") {
-    title = state.over.result === "mate" ? "Xeque-mate!" : "🏳️ Desistência";
+  if (state.over.result === "mate" || state.over.result === "resign" || state.over.result === "tempo") {
+    title = state.over.result === "mate" ? "Xeque-mate!" : state.over.result === "tempo" ? "⏰ Deu o tempo!" : "🏳️ Desistência";
     sub = COLOR_PT[state.over.winner] + " vencem a partida.";
     if (mode !== "local") sub += state.over.winner === myColor ? " 🏆 Você venceu!" : " Você perdeu.";
   } else if (state.over.result === "draw") {
@@ -1930,11 +2053,11 @@ function resignClicked() {
 }
 function offerDrawClicked() {
   if (!state || state.over) return;
-  if (mode === "matched") { sendGame({ t: "empate-oferta" }); toast("Proposta de empate enviada."); }
+  if (mode === "matched") { sendGame({ t: "empate-oferta" }); toast("Proposta de empate enviada — aguardando o oponente."); }
   else if (mode === "local") {
     if (confirm(COLOR_PT[state.turn] + " propõem empate. O adversário aceita?")) endBy("draw", null);
   } else {
-    if (conn && connOn) { conn.send({ type: "draw-offer" }); toast("Proposta de empate enviada."); }
+    if (conn && connOn) { conn.send({ type: "draw-offer" }); toast("Proposta de empate enviada — aguardando o oponente."); }
     else toast("Sem conexão com o oponente.");
   }
 }
@@ -1977,6 +2100,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("btnResign").addEventListener("click", resignClicked);
   $("btnOfferDraw").addEventListener("click", offerDrawClicked);
   $("deckpile").addEventListener("click", tryDraw);
+  $("btnDrawYes").addEventListener("click", () => drawAnswer(true));
+  $("btnDrawNo").addEventListener("click", () => drawAnswer(false));
   $("ovRestart").addEventListener("click", restart);
   $("ovClose").addEventListener("click", () => { $("overlay").hidden = true; });
   document.addEventListener("keydown", (e) => {
@@ -2001,6 +2126,9 @@ document.addEventListener("DOMContentLoaded", () => {
     $("liSenha").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
     $("btnLogout").addEventListener("click", doLogout);
     $("btnBuscar").addEventListener("click", buscarClicked);
+    for (const b of document.querySelectorAll(".tcbtn")) {
+      b.addEventListener("click", () => startSearch(parseInt(b.dataset.tc, 10)));
+    }
   }
   showMenu();
   tryResume();
