@@ -52,7 +52,7 @@ const ROOK_D   = [[-1,0],[1,0],[0,-1],[0,1]];
 const BISHOP_D = [[-1,-1],[-1,1],[1,-1],[1,1]];
 
 // variant: "padrao" (3 cartas sorteadas p/ cada jogador, sem repetição entre os dois,
-// 50 moedas iniciais) ou "treino" (todas as cartas, moedas infinitas)
+// 0 moedas iniciais) ou "treino" (todas as cartas, moedas infinitas)
 function initialState(variant) {
   const board = Array.from({ length: 8 }, () => Array(8).fill(null));
   const back = ["R","N","B","Q","K","B","N","R"];
@@ -83,7 +83,7 @@ function initialState(variant) {
     ep: null,
     cards: { w: cardsW, b: cardsB },
     deck: drawPile,
-    coins: { w: 50, b: 50 },
+    coins: { w: 0, b: 0 },
     variant: isTreino ? "treino" : "padrao",
     mines: [],
     fx: [],                          // casas que explodiram na última ação (para animação)
@@ -580,13 +580,13 @@ function canAfford(s, key) {
   return s.variant === "treino" || s.coins[s.turn] >= CARD_COST[key];
 }
 
-const HAND_LIMIT = 5;
+const HAND_LIMIT = 3;
 function handSize(s, col) {
   let n = 0;
   for (const k in s.cards[col]) if (s.cards[col][k] > 0) n++;
   return n;
 }
-// Comprar do monte: grátis, gasta o turno; máx. 5 cartas na mão;
+// Comprar do monte: grátis, gasta o turno; máx. 3 cartas na mão;
 // proibido em xeque (não resolve nada) e indisponível no modo treino.
 function canDraw(s) {
   return !s.over && s.variant !== "treino" && s.deck.length > 0 &&
