@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ChessTable — xadrez com cartas</title>
+<title>chesstable — xadrez com cartas</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js"></script>
 <style>
 :root{
@@ -146,8 +146,9 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
 .cimg{border:1.5px solid #cfc8ea; border-radius:4px; background:#221f35; padding:1px; margin-bottom:3px}
 .cimg svg{display:block; width:100%; height:auto}
 .cdesc{font-size:7.4px; color:var(--muted); line-height:1.3; overflow:hidden; flex:1}
-.card9.facedown{background:repeating-linear-gradient(135deg,#332d55 0 7px,#2a2545 7px 14px);
-  display:flex; align-items:center; justify-content:center; font-size:34px; color:#8b6ce8}
+:root{--cardback:url("data:image/jpeg;base64,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")}
+.card9.facedown{background:var(--cardback) center/cover no-repeat; border-color:#c9a84c;
+  display:flex; align-items:center; justify-content:center; font-size:0; color:transparent}
 .slotempty{width:91px; aspect-ratio:9/16; flex:0 0 auto; border:2px dashed #4a4470; border-radius:9px; opacity:.45}
 
 /* linha do meio: ações | monte | tabela de lances */
@@ -160,12 +161,16 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
 #deckcol{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px}
 #deckpile{cursor:pointer}
 #deckpile.nodraw{cursor:not-allowed; filter:grayscale(.6) brightness(.7)}
-.deckcard{width:86px; aspect-ratio:9/16; display:flex; flex-direction:column; align-items:center; justify-content:center;
-  font-size:34px; color:#8b6ce8; background:repeating-linear-gradient(135deg,#332d55 0 7px,#2a2545 7px 14px);
-  border:2px solid #55498a; border-radius:9px;
-  box-shadow:3px 3px 0 #221f35, 6px 6px 0 #1b1930, 0 8px 18px rgba(0,0,0,.45)}
-.deckcard span{font-size:15px; font-weight:900; color:var(--accent); background:rgba(20,16,32,.85); border-radius:8px; padding:1px 8px; margin-top:4px}
-#deckpile:not(.nodraw):hover .deckcard{transform:translateY(-3px)}
+#deckstack{position:relative; width:86px; aspect-ratio:9/16; margin:6px auto}
+.deckcard{position:absolute; inset:0; display:flex; align-items:flex-end; justify-content:center;
+  background:var(--cardback) center/cover no-repeat;
+  border:2px solid #c9a84c; border-radius:9px; box-shadow:0 6px 14px rgba(0,0,0,.45);
+  transition:transform .12s}
+.deckcard.l1{transform:translate(-6px,-6px) rotate(-5deg)}
+.deckcard.l2{transform:translate(-3px,-3px) rotate(-2.5deg)}
+.deckcard.l3{transform:translate(0,0) rotate(0deg)}
+.deckcard span{font-size:15px; font-weight:900; color:var(--accent); background:rgba(20,16,32,.85); border-radius:8px; padding:1px 8px; margin-bottom:5px}
+#deckpile:not(.nodraw):hover .deckcard.l3{transform:translateY(-5px)}
 .decklabel{font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:var(--muted)}
 #logwrap{display:flex; flex-direction:column; min-width:0}
 .loglabel{font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin-bottom:4px}
@@ -227,7 +232,7 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
 </svg>
 <div id="ghost" hidden></div>
 <header>
-  <h1>♞ Chess<span class="gold">Table</span></h1>
+  <h1>♞ chess<span class="gold">table</span></h1>
   <p>Xadrez clássico + cartas especiais, moedas e explosões</p>
 </header>
 
@@ -301,8 +306,8 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
       <b>🛟 Seguro do Rei</b> — teletransporta seu rei para qualquer casa vazia.<br>
       <b>💥 Mina Terrestre</b> — mina visível numa casa vazia: quem parar nela explode junto com os vizinhos, e ela <b>pode explodir reis</b>! Peças <b>não atravessam</b> a mina, ninguém pode detonar uma mina com o <b>próprio rei no raio</b> (nem o rei pode pisar nela), e um rei no alcance de uma mina detonável pelo inimigo está em <b>xeque</b>.<br>
       <b>🛡️ Armadura de Espinhos</b> — a peça não pode ser capturada: quem tentar, morre e a armadura quebra (Golpe à Distância e Bispo Atirador quebram só a armadura). Atenção: uma <b>torre bomba morta nos espinhos ainda explode</b>! Não vale para o rei.<br><br>
-      <b>🪙 Moedas</b> — cada carta tem um custo (base: Invocar Cavalo = 27). Você começa com <b>50 moedas</b> e ganha <b>+5 a cada lance</b>. Sem moedas, a carta não pode ser jogada — nem para escapar de xeque!<br>
-      <b>🎴 Mão e monte</b> — cada jogador recebe <b>3 cartas sorteadas</b> (sem repetição entre os dois) e as 11 restantes formam o <b>monte</b>. No seu turno: <b>mover</b>, <b>usar carta</b> ou <b>comprar 1 do monte</b> (grátis, com menos de <b>5 cartas</b> na mão e fora de xeque). A mão do adversário fica <b>virada</b>.<br>
+      <b>🪙 Moedas</b> — cada carta tem um custo (base: Invocar Cavalo = 27). Você começa com <b>0 moedas</b> e ganha <b>+5 a cada lance</b>. Sem moedas, a carta não pode ser jogada — nem para escapar de xeque!<br>
+      <b>🎴 Mão e monte</b> — cada jogador recebe <b>3 cartas sorteadas</b> (sem repetição entre os dois) e as 11 restantes formam o <b>monte</b>. No seu turno: <b>mover</b>, <b>usar carta</b> ou <b>comprar 1 do monte</b> (grátis, com menos de <b>3 cartas</b> na mão e fora de xeque). A mão do adversário fica <b>virada</b>.<br>
       <b>⏰ Rankeadas</b> — escolha <b>1, 3 ou 10 minutos</b>; você só enfrenta quem escolheu o mesmo formato, e o tempo esgotado é <b>derrota</b>.<br><br>
       Cada peça pode carregar <b>no máximo UM efeito</b>. Reis e pedras sobrevivem a explosões (mas minas e bombas <b>podem matar reis</b> — veja acima). Peão promovido <b>escolhe</b> a peça. Só é xeque-mate se nem as cartas salvarem!
     </div>
@@ -326,7 +331,11 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
       </div>
       <div id="deckcol">
         <div id="deckpile" title="Monte de cartas — clique para comprar (grátis, gasta o turno)">
-          <div class="deckcard">🂠<span id="deckCount"></span></div>
+          <div id="deckstack">
+            <div class="deckcard l1"></div>
+            <div class="deckcard l2"></div>
+            <div class="deckcard l3"><span id="deckCount"></span></div>
+          </div>
         </div>
         <div class="decklabel">Monte</div>
       </div>
@@ -421,7 +430,7 @@ const ROOK_D   = [[-1,0],[1,0],[0,-1],[0,1]];
 const BISHOP_D = [[-1,-1],[-1,1],[1,-1],[1,1]];
 
 // variant: "padrao" (3 cartas sorteadas p/ cada jogador, sem repetição entre os dois,
-// 50 moedas iniciais) ou "treino" (todas as cartas, moedas infinitas)
+// 0 moedas iniciais) ou "treino" (todas as cartas, moedas infinitas)
 function initialState(variant) {
   const board = Array.from({ length: 8 }, () => Array(8).fill(null));
   const back = ["R","N","B","Q","K","B","N","R"];
@@ -452,7 +461,7 @@ function initialState(variant) {
     ep: null,
     cards: { w: cardsW, b: cardsB },
     deck: drawPile,
-    coins: { w: 50, b: 50 },
+    coins: { w: 0, b: 0 },
     variant: isTreino ? "treino" : "padrao",
     mines: [],
     fx: [],                          // casas que explodiram na última ação (para animação)
@@ -949,13 +958,13 @@ function canAfford(s, key) {
   return s.variant === "treino" || s.coins[s.turn] >= CARD_COST[key];
 }
 
-const HAND_LIMIT = 5;
+const HAND_LIMIT = 3;
 function handSize(s, col) {
   let n = 0;
   for (const k in s.cards[col]) if (s.cards[col][k] > 0) n++;
   return n;
 }
-// Comprar do monte: grátis, gasta o turno; máx. 5 cartas na mão;
+// Comprar do monte: grátis, gasta o turno; máx. 3 cartas na mão;
 // proibido em xeque (não resolve nada) e indisponível no modo treino.
 function canDraw(s) {
   return !s.over && s.variant !== "treino" && s.deck.length > 0 &&
@@ -1097,7 +1106,7 @@ if (typeof module !== "undefined" && module.exports) {
 </script>
 <script>
 /* ============================================================
-   ChessTable — Interface + Multiplayer
+   chesstable — Interface + Multiplayer
    Peças: conjunto SVG "staunty" (lichess, licença aberta)
    ============================================================ */
 "use strict";
@@ -1132,7 +1141,7 @@ let pendingPromo = null;
 
 const $ = (id) => document.getElementById(id);
 
-/* ---------- conta / servidor ChessTable ---------- */
+/* ---------- conta / servidor chesstable ---------- */
 const SERVER = location.protocol === "http:" || location.protocol === "https:";
 let authToken = null;
 try { authToken = localStorage.getItem("ct_token"); } catch (e) {}
@@ -1161,7 +1170,7 @@ function api(p, body) {
 function acctMsg(html) { $("acctMsg").innerHTML = html; }
 function renderAccount() {
   if (!SERVER) {
-    $("accountCard").innerHTML = "<h2>♞ Sua conta</h2><div class='small'>Contas, busca de partida e rating funcionam quando o jogo roda no servidor ChessTable (node server.js). Os modos abaixo funcionam normalmente.</div>";
+    $("accountCard").innerHTML = "<h2>♞ Sua conta</h2><div class='small'>Contas, busca de partida e rating funcionam quando o jogo roda no servidor chesstable (node server.js). Os modos abaixo funcionam normalmente.</div>";
     return;
   }
   $("acctLogged").hidden = !me;
@@ -2117,7 +2126,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("pointermove", onPointerMove);
   document.addEventListener("pointerup", onPointerUp);
   document.addEventListener("pointercancel", onPointerUp);
-  // conta ChessTable
+  // conta chesstable
   if (SERVER) {
     $("tabLogin").addEventListener("click", () => { $("formLogin").hidden = false; $("formReg").hidden = true; $("tabLogin").classList.add("on"); $("tabReg").classList.remove("on"); });
     $("tabReg").addEventListener("click", () => { $("formLogin").hidden = true; $("formReg").hidden = false; $("tabReg").classList.add("on"); $("tabLogin").classList.remove("on"); });
