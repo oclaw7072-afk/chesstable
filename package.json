@@ -4,5 +4,6 @@
   "description": "Xadrez com cartas, moedas, matchmaking por tempo e rating",
   "main": "server.js",
   "scripts": { "start": "node server.js" },
+  "dependencies": { "pg": "^8.13.1" },
   "engines": { "node": ">=16" }
 }
