@@ -3,6 +3,6 @@ services:
     name: chesstable
     runtime: node
     plan: free
-    buildCommand: ""
+    buildCommand: npm install
     startCommand: node server.js
     healthCheckPath: /
