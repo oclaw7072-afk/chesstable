@@ -37,12 +37,90 @@ const MAIL_WEBHOOK = process.env.MAIL_WEBHOOK_URL || CFG.mailWebhook || "";
 const DEV_MAIL = !MAIL_WEBHOOK && !BREVO_KEY && !(CFG.smtp && CFG.smtp.host); // sem e-mail configurado: modo demonstração (link aparece na tela)
 
 /* ---------------- banco de dados ---------------- */
+// Com DATABASE_URL definido, os dados ficam no Postgres (sobrevivem a reinícios e
+// novas publicações). Sem ele, caem no arquivo db.json, como antes.
+const DB_URL = process.env.DATABASE_URL || "";
+let pool = null;
+if (DB_URL) {
+  try {
+    const { Pool } = require("pg");
+    pool = new Pool({
+      connectionString: DB_URL,
+      ssl: /\brender\.com\b/.test(DB_URL) ? { rejectUnauthorized: false } : undefined,
+      max: 4
+    });
+    pool.on("error", (e) => console.log("ERRO BANCO (pool):", e.message));
+  } catch (e) {
+    console.log("ERRO BANCO: pacote pg indisponível (" + e.message + ") — usando arquivo.");
+    pool = null;
+  }
+}
+
 let db = { users: {}, sessions: {} };
-try { db = JSON.parse(fs.readFileSync(DB_FILE, "utf8")); } catch (e) {}
+
+async function carregarDB() {
+  if (!pool) {
+    try { db = JSON.parse(fs.readFileSync(DB_FILE, "utf8")); } catch (e) {}
+    return "arquivo " + DB_FILE;
+  }
+  await pool.query(
+    "CREATE TABLE IF NOT EXISTS estado (id int PRIMARY KEY, dados jsonb NOT NULL, atualizado timestamptz NOT NULL DEFAULT now())"
+  );
+  const r = await pool.query("SELECT dados FROM estado WHERE id = 1");
+  if (r.rows[0] && r.rows[0].dados) {
+    const d = r.rows[0].dados;
+    db = { users: d.users || {}, sessions: d.sessions || {} };
+  } else {
+    // primeira vez: aproveita um db.json existente, se houver
+    try { db = JSON.parse(fs.readFileSync(DB_FILE, "utf8")); } catch (e) {}
+    await gravarNoBanco();
+  }
+  return "Postgres";
+}
+
+let gravando = false, regravar = false;
+async function gravarNoBanco() {
+  if (gravando) { regravar = true; return; }
+  gravando = true;
+  try {
+    await pool.query(
+      "INSERT INTO estado (id, dados, atualizado) VALUES (1, $1, now()) " +
+      "ON CONFLICT (id) DO UPDATE SET dados = EXCLUDED.dados, atualizado = now()",
+      [JSON.stringify(db)]
+    );
+  } catch (e) {
+    console.log("ERRO BANCO (gravar):", e.message);
+  } finally {
+    gravando = false;
+    if (regravar) { regravar = false; gravarNoBanco(); }
+  }
+}
+
+// grava o que estiver pendente antes de o Render encerrar o processo
+let encerrando = false;
+function encerrarComGravacao() {
+  if (encerrando) return;
+  encerrando = true;
+  clearTimeout(saveTimer);
+  const fim = () => process.exit(0);
+  if (pool) gravarNoBanco().then(() => pool.end().catch(() => {})).then(fim, fim);
+  else {
+    try {
+      const tmp = DB_FILE + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(db));
+      fs.renameSync(tmp, DB_FILE);
+    } catch (e) {}
+    fim();
+  }
+}
+process.on("SIGTERM", encerrarComGravacao);
+process.on("SIGINT", encerrarComGravacao);
+
 let saveTimer = null;
 function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
+    if (pool) return gravarNoBanco();
     const tmp = DB_FILE + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(db));
     fs.renameSync(tmp, DB_FILE);
@@ -436,9 +514,19 @@ server.on("upgrade", (req, sock) => {
   }, desconecta);
 });
 
+carregarDB().then((onde) => {
+  console.log("💾 Dados em: " + onde);
+  iniciarServidor();
+}).catch((e) => {
+  console.log("ERRO BANCO (carregar):", e.message, "— subindo mesmo assim com dados vazios.");
+  iniciarServidor();
+});
+
+function iniciarServidor() {
 server.listen(PORT, () => {
   console.log("♞ chesstable rodando em http://localhost:" + PORT);
   console.log(DEV_MAIL
     ? "✉️  E-mail não configurado: modo demonstração (o link de confirmação aparece na tela e no console)."
     : "✉️  E-mail configurado (" + (MAIL_WEBHOOK ? "Gmail via Apps Script" : BREVO_KEY ? "API Brevo" : "SMTP") + "): confirmações serão enviadas de verdade.");
 });
+}
