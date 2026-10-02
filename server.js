@@ -56,9 +56,30 @@ if (DB_URL) {
   }
 }
 
+// Alternativa gratuita: guardar os dados num arquivo do seu Google Drive, pelo
+// mesmo Apps Script que envia os e-mails. Precisa de DB_WEBHOOK_URL (ou reaproveita
+// MAIL_WEBHOOK_URL) e de DB_KEY, a chave que o script gera.
+const DB_WEBHOOK = process.env.DB_WEBHOOK_URL || MAIL_WEBHOOK || "";
+const DB_KEY = process.env.DB_KEY || "";
+const usandoDrive = !pool && !!DB_WEBHOOK && !!DB_KEY;
+
+function chamarScript(corpo) {
+  return new Promise((resolve, reject) => {
+    webhookReq(DB_WEBHOOK, JSON.stringify(corpo), (err, _ok, dados) => {
+      if (err) reject(err); else resolve(dados);
+    });
+  });
+}
+
 let db = { users: {}, sessions: {} };
 
 async function carregarDB() {
+  if (usandoDrive) {
+    const r = await chamarScript({ acao: "ler", chave: DB_KEY });
+    if (r && r.dados) db = { users: r.dados.users || {}, sessions: r.dados.sessions || {} };
+    else { try { db = JSON.parse(fs.readFileSync(DB_FILE, "utf8")); } catch (e) {} await gravarNoDrive(); }
+    return "Google Drive (Apps Script)";
+  }
   if (!pool) {
     try { db = JSON.parse(fs.readFileSync(DB_FILE, "utf8")); } catch (e) {}
     return "arquivo " + DB_FILE;
@@ -76,6 +97,20 @@ async function carregarDB() {
     await gravarNoBanco();
   }
   return "Postgres";
+}
+
+let gravandoDrive = false, regravarDrive = false;
+async function gravarNoDrive() {
+  if (gravandoDrive) { regravarDrive = true; return; }
+  gravandoDrive = true;
+  try {
+    await chamarScript({ acao: "gravar", chave: DB_KEY, dados: db });
+  } catch (e) {
+    console.log("ERRO DRIVE (gravar):", e.message);
+  } finally {
+    gravandoDrive = false;
+    if (regravarDrive) { regravarDrive = false; gravarNoDrive(); }
+  }
 }
 
 let gravando = false, regravar = false;
@@ -103,7 +138,8 @@ function encerrarComGravacao() {
   encerrando = true;
   clearTimeout(saveTimer);
   const fim = () => process.exit(0);
-  if (pool) gravarNoBanco().then(() => pool.end().catch(() => {})).then(fim, fim);
+  if (usandoDrive) gravarNoDrive().then(fim, fim);
+  else if (pool) gravarNoBanco().then(() => pool.end().catch(() => {})).then(fim, fim);
   else {
     try {
       const tmp = DB_FILE + ".tmp";
@@ -120,11 +156,12 @@ let saveTimer = null;
 function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
+    if (usandoDrive) return gravarNoDrive();
     if (pool) return gravarNoBanco();
     const tmp = DB_FILE + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(db));
     fs.renameSync(tmp, DB_FILE);
-  }, 50);
+  }, usandoDrive ? 800 : 50);   // no Drive, espaça as gravações
 }
 const userKey = (nome) => nome.trim().toLowerCase();
 function pubUser(u) {
@@ -184,7 +221,7 @@ function webhookReq(url, body, cb, hops) {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && (hops || 0) < 3)
         return webhookReq(new URL(res.headers.location, u).toString(), null, cb, (hops || 0) + 1);
       let j = null; try { j = JSON.parse(out); } catch (e) {}
-      if (res.statusCode < 300 && j && j.ok) return cb(null, "sent");
+      if (res.statusCode < 300 && j && j.ok) return cb(null, "sent", j);
       cb(new Error("Webhook " + res.statusCode + " " + (j ? JSON.stringify(j) : out.slice(0, 120))));
     });
   });
