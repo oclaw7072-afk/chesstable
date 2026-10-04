@@ -254,20 +254,14 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
       <button class="bigbtn ghost" id="btnLogout">Sair da conta</button>
     </div>
     <div id="acctForms">
-      <div class="row" style="margin-bottom:10px">
-        <button class="bigbtn ghost tab on" id="tabLogin">Entrar</button>
-        <button class="bigbtn ghost tab" id="tabReg">Criar conta</button>
+      <div class="small" style="text-align:center; margin-bottom:10px">
+        Entre com sua Conta do Google para jogar partidas rankeadas.
       </div>
-      <div id="formLogin">
-        <input class="txt" id="liNome" placeholder="nome de usuário" autocomplete="username">
-        <input class="txt" id="liSenha" type="password" placeholder="senha" autocomplete="current-password">
-        <button class="bigbtn" id="btnLogin">Entrar</button>
-      </div>
-      <div id="formReg" hidden>
-        <input class="txt" id="rgNome" placeholder="nome de usuário (3–16, letras/números/_)" maxlength="16">
-        <input class="txt" id="rgEmail" type="email" placeholder="seu e-mail">
-        <input class="txt" id="rgSenha" type="password" placeholder="senha (mín. 6)" autocomplete="new-password">
-        <button class="bigbtn" id="btnReg">Criar conta</button>
+      <div id="googleBtn" style="display:flex; justify-content:center"></div>
+      <div id="apelidoBox" hidden style="margin-top:10px">
+        <div class="small" style="margin-bottom:6px">Escolha seu nome no jogo (3–16, letras, números ou _):</div>
+        <input class="txt" id="apelido" maxlength="16" placeholder="seu nome no jogo">
+        <button class="bigbtn" id="btnApelido">Confirmar nome</button>
       </div>
       <div id="acctMsg" class="small" style="margin-top:8px; min-height:18px"></div>
     </div>
@@ -1193,31 +1187,62 @@ function tryResume() {
     renderAccount();
   }).catch(() => renderAccount());
 }
-function doRegister() {
-  const nome = $("rgNome").value, email = $("rgEmail").value, senha = $("rgSenha").value;
-  acctMsg("Criando conta…");
-  api("/api/registrar", { nome, email, senha }).then(r => {
-    if (r.erro) return acctMsg("⚠️ " + r.erro);
-    if (r.demo) acctMsg("✅ Conta criada! (servidor sem e-mail configurado — modo demonstração)<br><a href='" + r.demo + "' target='_blank'>➡️ Clique aqui para confirmar sua conta</a><br>Depois volte e faça login.");
-    else acctMsg("✅ Conta criada! Enviamos um <b>link de confirmação</b> para " + email + ". Clique nele e depois faça login aqui.");
+let credGoogle = null;
+
+function iniciarGoogle() {
+  if (!SERVER) return;
+  api("/api/config").then((c) => {
+    if (!c.googleClientId) { acctMsg("⚠️ Login com Google ainda não configurado."); return; }
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.onload = () => {
+      google.accounts.id.initialize({ client_id: c.googleClientId, callback: respostaGoogle });
+      google.accounts.id.renderButton($("googleBtn"), { theme: "filled_blue", size: "large", text: "signin_with", locale: "pt-BR" });
+    };
+    s.onerror = () => acctMsg("⚠️ Não consegui carregar o login do Google.");
+    document.head.appendChild(s);
   }).catch(() => acctMsg("⚠️ Erro de conexão com o servidor."));
 }
-function doLogin() {
+
+function respostaGoogle(resp) {
+  credGoogle = resp.credential;
   acctMsg("Entrando…");
-  api("/api/entrar", { nome: $("liNome").value, senha: $("liSenha").value }).then(r => {
+  enviarGoogle();
+}
+
+function enviarGoogle(nome) {
+  api("/api/google", { credential: credGoogle, nome: nome || "" }).then((r) => {
     if (r.erro) return acctMsg("⚠️ " + r.erro);
+    if (r.precisaNome) {
+      $("apelidoBox").hidden = false;
+      $("apelido").value = r.sugestao || "";
+      $("apelido").focus();
+      return acctMsg("Primeiro acesso: escolha seu nome no jogo.");
+    }
     authToken = r.token; me = r.usuario;
     try { localStorage.setItem("ct_token", authToken); } catch (e) {}
+    credGoogle = null;
+    $("apelidoBox").hidden = true;
     acctMsg("");
     connectWS();
     renderAccount();
   }).catch(() => acctMsg("⚠️ Erro de conexão com o servidor."));
 }
+
+function confirmarApelido() {
+  const nome = $("apelido").value.trim();
+  if (!/^[A-Za-z0-9_]{3,16}$/.test(nome)) return acctMsg("⚠️ Nome: 3–16 letras, números ou _");
+  acctMsg("Criando sua conta…");
+  enviarGoogle(nome);
+}
+
 function doLogout() {
   api("/api/sair", {}).catch(() => {});
   authToken = null; me = null; searching = false; searchTC = 0;
   try { localStorage.removeItem("ct_token"); } catch (e) {}
   if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+  try { google.accounts.id.disableAutoSelect(); } catch (e) {}
   renderAccount();
 }
 function connectWS() {
@@ -2128,11 +2153,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("pointercancel", onPointerUp);
   // conta chesstable
   if (SERVER) {
-    $("tabLogin").addEventListener("click", () => { $("formLogin").hidden = false; $("formReg").hidden = true; $("tabLogin").classList.add("on"); $("tabReg").classList.remove("on"); });
-    $("tabReg").addEventListener("click", () => { $("formLogin").hidden = true; $("formReg").hidden = false; $("tabReg").classList.add("on"); $("tabLogin").classList.remove("on"); });
-    $("btnReg").addEventListener("click", doRegister);
-    $("btnLogin").addEventListener("click", doLogin);
-    $("liSenha").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
+    $("btnApelido").addEventListener("click", confirmarApelido);
+    $("apelido").addEventListener("keydown", (e) => { if (e.key === "Enter") confirmarApelido(); });
+    iniciarGoogle();
     $("btnLogout").addEventListener("click", doLogout);
     $("btnBuscar").addEventListener("click", buscarClicked);
     for (const b of document.querySelectorAll(".tcbtn")) {
