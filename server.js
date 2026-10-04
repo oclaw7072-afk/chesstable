@@ -59,6 +59,7 @@ if (DB_URL) {
 // Alternativa gratuita: guardar os dados num arquivo do seu Google Drive, pelo
 // mesmo Apps Script que envia os e-mails. Precisa de DB_WEBHOOK_URL (ou reaproveita
 // MAIL_WEBHOOK_URL) e de DB_KEY, a chave que o script gera.
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const DB_WEBHOOK = process.env.DB_WEBHOOK_URL || MAIL_WEBHOOK || "";
 const DB_KEY = process.env.DB_KEY || "";
 const usandoDrive = !pool && !!DB_WEBHOOK && !!DB_KEY;
@@ -258,6 +259,35 @@ function sendMail(to, subject, text, cb, meta) {
     else { sock.end(); cb(null, "sent"); }
   });
 }
+// Confere o token do "Entrar com Google" no endpoint público do próprio Google.
+function verificarGoogle(credential, cb) {
+  const req = https.request({
+    host: "oauth2.googleapis.com",
+    path: "/tokeninfo?id_token=" + encodeURIComponent(credential),
+    method: "GET"
+  }, (res) => {
+    let out = "";
+    res.on("data", (d) => out += d);
+    res.on("end", () => {
+      let j = null; try { j = JSON.parse(out); } catch (e) {}
+      if (res.statusCode !== 200 || !j || !j.sub) return cb(new Error("token recusado pelo Google"));
+      if (GOOGLE_CLIENT_ID && j.aud !== GOOGLE_CLIENT_ID) return cb(new Error("token de outro aplicativo"));
+      if (String(j.email_verified) !== "true") return cb(new Error("e-mail não verificado no Google"));
+      if (Number(j.exp) * 1000 < Date.now()) return cb(new Error("token vencido"));
+      cb(null, j);
+    });
+  });
+  req.setTimeout(15000, () => req.destroy(new Error("Google demorou a responder")));
+  req.on("error", (e) => cb(e));
+  req.end();
+}
+
+function apelidoSugerido(email) {
+  let base = String(email || "").split("@")[0].replace(/[^A-Za-z0-9_]/g, "");
+  if (base.length < 3) base = "jogador";
+  return base.slice(0, 16);
+}
+
 function baseUrl(req) {
   if (CFG.baseUrl) return CFG.baseUrl.replace(/\/$/, "");
   const proto = req.headers["x-forwarded-proto"] || "http";
@@ -313,51 +343,69 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     return fs.createReadStream(path.join(__dirname, "public", "index.html")).pipe(res);
   }
-  if (p === "/confirmar") {
-    const tok = url.searchParams.get("t") || "";
-    for (const k in db.users) {
-      const u = db.users[k];
-      if (u.vtoken && u.vtoken === tok) {
-        u.verificado = true; delete u.vtoken; save();
-        return page(res, "Conta confirmada! ✅", "Bem-vindo(a), <b>" + u.nome + "</b>. Volte ao jogo e faça login.");
-      }
-    }
-    return page(res, "Link inválido", "Este link de confirmação não existe ou já foi usado.");
+  if (p === "/privacidade") {
+    return page(res, "Política de Privacidade",
+      "O chesstable é um jogo gratuito de xadrez com cartas.<br><br>" +
+      "<b>O que guardamos:</b> seu nome no jogo, o endereço de e-mail da Conta do Google usada para entrar, " +
+      "seu identificador do Google, seu rating e o histórico de vitórias, derrotas e empates.<br><br>" +
+      "<b>Para que serve:</b> identificar você entre as partidas e manter o ranking. Nada é vendido, " +
+      "compartilhado com terceiros ou usado para publicidade.<br><br>" +
+      "<b>Entrar com Google:</b> recebemos do Google apenas seu e-mail e identificador. Nunca temos acesso " +
+      "à sua senha nem a outros dados da sua conta.<br><br>" +
+      "<b>Apagar seus dados:</b> peça por e-mail para oclaw7072@gmail.com e a conta e o histórico são removidos.<br><br>" +
+      "<b>Contato:</b> oclaw7072@gmail.com");
   }
-  if (p === "/api/registrar" && req.method === "POST") {
+
+  if (p === "/termos") {
+    return page(res, "Termos de Serviço",
+      "O chesstable é oferecido gratuitamente, no estado em que se encontra, sem garantia de " +
+      "funcionamento contínuo ou de preservação de partidas e ratings.<br><br>" +
+      "<b>Uso:</b> jogue de forma respeitosa. Contas usadas para trapaça, abuso ou automação podem ser " +
+      "removidas sem aviso.<br><br>" +
+      "<b>Conta:</b> o acesso é feito pela sua Conta do Google. Você pode pedir a remoção da sua conta " +
+      "a qualquer momento pelo e-mail abaixo.<br><br>" +
+      "<b>Mudanças:</b> estes termos podem mudar conforme o jogo evolui.<br><br>" +
+      "<b>Contato:</b> oclaw7072@gmail.com");
+  }
+
+  // Entrar com Google: o próprio Google confirma quem é a pessoa, sem e-mail nem senha.
+  if (p === "/api/google" && req.method === "POST") {
     return readBody(req, (b) => {
-      const nome = String(b.nome || "").trim();
-      const email = String(b.email || "").trim();
-      const senha = String(b.senha || "");
-      if (!/^[A-Za-z0-9_]{3,16}$/.test(nome)) return json(res, 400, { erro: "Nome: 3–16 letras, números ou _" });
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json(res, 400, { erro: "E-mail inválido." });
-      if (senha.length < 6) return json(res, 400, { erro: "Senha: mínimo 6 caracteres." });
-      const k = userKey(nome);
-      if (db.users[k] && db.users[k].verificado) return json(res, 400, { erro: "Este nome já está em uso." });
-      const { salt, h } = hashPass(senha);
-      const vtoken = crypto.randomBytes(24).toString("hex");
-      db.users[k] = { nome, email, salt, hash: h, verificado: false, vtoken,
-        rating: 1200, rd: 350, partidas: 0, vitorias: 0, derrotas: 0, empates: 0, criado: Date.now() };
-      save();
-      const link = baseUrl(req) + "/confirmar?t=" + vtoken;
-      sendMail(email, "chesstable — confirme sua conta",
-        "Olá, " + nome + "!\r\n\r\nClique no link para confirmar sua conta no chesstable:\r\n" + link + "\r\n\r\nSe você não criou esta conta, ignore este e-mail.",
-        (err) => {
-          console.log("[registro]", nome, email, DEV_MAIL ? "(modo demo) " + link : (err ? "ERRO E-MAIL: " + err.message : "e-mail enviado"));
-          if (err && !DEV_MAIL) return json(res, 500, { erro: "Falha ao enviar o e-mail. Tente de novo." });
-          json(res, 200, { ok: true, demo: DEV_MAIL ? link : undefined });
-        }, { nome, link });
+      if (!GOOGLE_CLIENT_ID) return json(res, 500, { erro: "Login com Google ainda não configurado no servidor." });
+      verificarGoogle(String(b.credential || ""), (err, info) => {
+        if (err) return json(res, 400, { erro: "Login do Google recusado: " + err.message });
+        const gid = info.sub;
+        let k = null;
+        for (const chave in db.users) if (db.users[chave].gid === gid) { k = chave; break; }
+        if (k) {
+          const u = db.users[k];
+          return json(res, 200, { ok: true, token: newSession(u.nome), usuario: pubUser(u) });
+        }
+        // conta antiga criada por e-mail: liga ao Google quando o endereço é o mesmo
+        for (const chave in db.users) {
+          const u = db.users[chave];
+          if (!u.gid && u.email && u.email.toLowerCase() === String(info.email).toLowerCase()) {
+            u.gid = gid; u.verificado = true; delete u.vtoken; delete u.salt; delete u.hash; save();
+            console.log("[conta ligada ao google]", u.nome, info.email);
+            return json(res, 200, { ok: true, token: newSession(u.nome), usuario: pubUser(u) });
+          }
+        }
+        const nome = String(b.nome || "").trim();
+        if (!nome) return json(res, 200, { ok: true, precisaNome: true, sugestao: apelidoSugerido(info.email) });
+        if (!/^[A-Za-z0-9_]{3,16}$/.test(nome)) return json(res, 400, { erro: "Nome: 3–16 letras, números ou _" });
+        const nk = userKey(nome);
+        if (db.users[nk]) return json(res, 400, { erro: "Este nome já está em uso." });
+        db.users[nk] = { nome, email: info.email, gid, verificado: true,
+          rating: 1200, rd: 350, partidas: 0, vitorias: 0, derrotas: 0, empates: 0, criado: Date.now() };
+        save();
+        console.log("[conta google]", nome, info.email);
+        json(res, 200, { ok: true, token: newSession(nome), usuario: pubUser(db.users[nk]) });
+      });
     });
   }
-  if (p === "/api/entrar" && req.method === "POST") {
-    return readBody(req, (b) => {
-      const u = db.users[userKey(String(b.nome || ""))];
-      if (!u) return json(res, 400, { erro: "Usuário não encontrado." });
-      if (!checkPass(String(b.senha || ""), u)) return json(res, 400, { erro: "Senha incorreta." });
-      if (!u.verificado) return json(res, 400, { erro: "Conta ainda não confirmada — verifique seu e-mail." });
-      json(res, 200, { ok: true, token: newSession(u.nome), usuario: pubUser(u) });
-    });
-  }
+
+  if (p === "/api/config") return json(res, 200, { googleClientId: GOOGLE_CLIENT_ID });
+
   if (p === "/api/eu") {
     const u = sessionUser(req.headers["x-token"]);
     return u ? json(res, 200, { ok: true, usuario: pubUser(u) }) : json(res, 401, { erro: "Sessão inválida." });
