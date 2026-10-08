@@ -51,6 +51,8 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
 #rankingBox td{padding:2.5px 4px; border-bottom:1px solid #353052}
 #rankingBox td.rt{text-align:right; color:var(--accent); font-weight:800}
 #acctMsg a{color:var(--accent2); font-weight:700}
+#botPicker{margin:6px 0 2px; padding:12px; background:#221f35; border-radius:12px; border:1px dashed #4a4470}
+#botPicker .tclabel{text-align:center; font-size:13px; color:var(--muted); margin-bottom:10px; font-weight:700}
 #tcPicker{margin-top:6px; padding:14px; background:#221f35; border-radius:12px; border:1px dashed #4a4470}
 #tcPicker .tclabel{text-align:center; font-size:13px; color:var(--muted); margin-bottom:10px; font-weight:700}
 .tcrow{display:flex; gap:8px}
@@ -271,6 +273,15 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
     <h2>Jogar</h2>
     <button class="bigbtn" id="btnHost">🌐 Criar sala online</button>
     <button class="bigbtn" id="btnShowJoin">🔑 Entrar com código</button>
+    <button class="bigbtn" id="btnBot">🤖 Jogar contra o computador</button>
+    <div id="botPicker" hidden>
+      <div class="tclabel">Escolha o nível do computador:</div>
+      <div class="tcrow">
+        <button class="tcbtn" data-bot="1"><span class="big">🙂</span>Nível 1<span class="sub">iniciante</span></button>
+        <button class="tcbtn" data-bot="2"><span class="big">😎</span>Nível 2<span class="sub">intermediário</span></button>
+        <button class="tcbtn" data-bot="3"><span class="big">🤖</span>Nível 3<span class="sub">difícil</span></button>
+      </div>
+    </div>
     <button class="bigbtn ghost" id="btnLocal">💻 Dois jogadores no mesmo PC</button>
     <button class="bigbtn ghost" id="btnTreino">🎓 Modo treino — todas as cartas, moedas infinitas</button>
     <div id="hostPanel" hidden>
@@ -1372,6 +1383,153 @@ function drawAnswer(aceita) {
   }
 }
 
+/* ---------- bot (jogar contra o computador) ---------- */
+const VAL_PECA = { P: 100, N: 300, B: 320, R: 500, Q: 900, K: 0 };
+
+function valorPeca(p) {
+  let v = VAL_PECA[p.t] || 0;
+  if (p.st) for (const t in p.st) if (p.st[t] && t !== p.t) v += Math.round((VAL_PECA[t] || 0) * 0.45);
+  if (p.sn) v += 120;          // bispo atirador
+  if (p.bm) v += 90;           // torre bomba
+  if (p.ar) v += 110;          // armadura
+  return v;
+}
+
+// quanto a posição vale para 'col' (positivo = melhor para col)
+function avaliar(s, col) {
+  if (s.over) {
+    if (s.over.result === "draw" || s.over.result === "stalemate") return 0;
+    return s.over.winner === col ? 100000 : -100000;
+  }
+  let v = 0;
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = s.board[r][c];
+    if (!p || !p.t || p.t === "X") continue;
+    v += (p.c === col ? 1 : -1) * valorPeca(p);
+  }
+  if (s.variant !== "treino") v += (s.coins[col] - s.coins[enemy(col)]) * 0.8;
+  if (inCheck(s, enemy(col))) v += 35;
+  if (inCheck(s, col)) v -= 45;
+  return v;
+}
+
+// todas as ações possíveis de quem está na vez
+function acoesDoBot(s, incluirCartas) {
+  const out = [];
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = s.board[r][c];
+    if (!p || !p.t || p.c !== s.turn) continue;
+    for (const m of legalMovesFor(s, r, c)) {
+      out.push({ kind: "move", from: [r, c], to: [m.to[0], m.to[1]], promo: "Q" });
+    }
+  }
+  if (incluirCartas) {
+    for (const key of CARD_KEYS) {
+      if (!s.cards[s.turn][key] || !canAfford(s, key)) continue;
+      for (const at of cardTargets(s, key)) out.push({ kind: "card", card: key, at: at });
+    }
+    if (canDraw(s)) out.push({ kind: "draw" });
+  }
+  return out;
+}
+
+function simular(s, a) {
+  const t = cloneState(s);
+  t.log = [];          // cloneState compartilha o log: a simulação precisa do seu próprio
+  const r = applyAction(t, a);
+  return r.ok ? t : null;
+}
+
+function escolherJogadaBot(s, nivel) {
+  const col = s.turn;
+  const acoes = acoesDoBot(s, true);
+  if (!acoes.length) return null;
+
+  // nível 1: quase aleatório, mas costuma aproveitar capturas simples
+  if (nivel === 1) {
+    if (Math.random() < 0.65) {
+      const capturas = acoes.filter(a => a.kind === "move" && s.board[a.to[0]][a.to[1]] && s.board[a.to[0]][a.to[1]].t);
+      if (capturas.length) return capturas[Math.floor(Math.random() * capturas.length)];
+    }
+    return acoes[Math.floor(Math.random() * acoes.length)];
+  }
+
+  // pontua cada ação pelo resultado imediato
+  const pontuadas = [];
+  for (const a of acoes) {
+    const t = simular(s, a);
+    if (!t) continue;
+    pontuadas.push({ a: a, t: t, v: avaliar(t, col) });
+  }
+  if (!pontuadas.length) return acoes[0];
+  pontuadas.sort((x, y) => y.v - x.v);
+
+  if (nivel === 2) {
+    // melhor jogada imediata, com desempate aleatório entre as quase iguais
+    const topo = pontuadas.filter(p => p.v >= pontuadas[0].v - 8);
+    return topo[Math.floor(Math.random() * topo.length)].a;
+  }
+
+  // nível 3: olha também a melhor resposta do adversário (2 lances)
+  const candidatos = pontuadas.slice(0, 14);
+  let melhor = candidatos[0], melhorV = -Infinity;
+  for (const cand of candidatos) {
+    if (cand.t.over) {
+      const v = avaliar(cand.t, col);
+      if (v > melhorV) { melhorV = v; melhor = cand; }
+      continue;
+    }
+    const respostas = acoesDoBot(cand.t, true).slice(0, 40);
+    let pior = Infinity;
+    for (const rp of respostas) {
+      const t2 = simular(cand.t, rp);
+      if (!t2) continue;
+      const v = avaliar(t2, col);
+      if (v < pior) pior = v;
+      if (pior <= melhorV - 400) break;   // já é ruim demais
+    }
+    if (pior === Infinity) pior = cand.v;
+    if (pior > melhorV) { melhorV = pior; melhor = cand; }
+  }
+  return melhor.a;
+}
+
+let botNivel = 0;        // 0 = sem bot; 1, 2 ou 3
+let botPensando = false;
+const BOT_COR = "b";     // o computador joga de pretas
+
+function iniciarBot(nivel) {
+  botNivel = nivel;
+  mode = "bot";
+  myColor = "w";
+  roomCode = "";
+  $("botPicker").hidden = true;
+  startGame();
+  toast("Partida contra o computador — nível " + nivel + ". Você joga de brancas.");
+}
+
+function vezDoBot() {
+  return mode === "bot" && state && !state.over && state.turn === BOT_COR;
+}
+
+function jogarBot() {
+  if (!vezDoBot() || botPensando) return;
+  botPensando = true;
+  setTimeout(() => {
+    try {
+      if (!vezDoBot()) return;
+      const a = escolherJogadaBot(state, botNivel);
+      if (!a) return;
+      const res = applyAction(state, a);
+      if (!res.ok) return;
+      clearSelection();
+      render();
+    } finally {
+      botPensando = false;
+    }
+  }, 420);   // pequena pausa para parecer que pensou
+}
+
 /* ---------- helpers ---------- */
 function pieceSvg(p) {
   if (p.t === "X") return '<svg class="psvg rocksvg"><use href="#p-rock"/></svg>';
@@ -1402,6 +1560,7 @@ function squareContentHtml(r, c) {
 function myTurn() {
   if (!state || state.over) return false;
   if (mode === "local") return true;
+  if (mode === "bot") return state.turn === myColor && !botPensando;
   return state.turn === myColor;
 }
 function toast(msg, ms) {
@@ -1547,6 +1706,7 @@ function doAction(a) {
   else if (mode === "matched") sendGame({ t: "action", action: a });
   clearSelection();
   render();
+  if (mode === "bot") jogarBot();
   return true;
 }
 
@@ -2029,6 +2189,7 @@ function renderStatus() {
     ri.innerHTML = "🏅 Rankeada " + (TC_LABEL[matchTC] || "") + " — " + (me ? "👤 " + me.nome + " (⭐" + me.rating + ")" : "você") +
       " vs " + (opponent ? opponent.nome + " (⭐" + opponent.rating + ")" : "oponente");
   }
+  else if (mode === "bot") ri.textContent = "🤖 Contra o computador — nível " + botNivel + " (você joga de brancas)";
   else if (mode === "local") ri.textContent = state.variant === "treino" ? "🎓 Modo treino — todas as cartas, moedas infinitas" : "Modo: mesmo computador";
   else ri.innerHTML = 'Sala <b>' + roomCodeDisplay() + '</b> <span class="dot ' + (connOn ? "on" : "off") + '"></span>' + (connOn ? " conectado" : " desconectado");
 }
@@ -2075,6 +2236,8 @@ function resignClicked() {
   if (!state || state.over) return;
   if (mode === "matched") {
     if (confirm("Desistir da partida rankeada? Você perderá rating.")) sendGame({ t: "desistir" });
+  } else if (mode === "bot") {
+    if (confirm("Desistir da partida contra o computador?")) endBy("resign", BOT_COR);
   } else if (mode === "local") {
     const who = state.turn;
     if (confirm(COLOR_PT[who] + " desistem da partida?")) endBy("resign", enemy(who));
@@ -2088,6 +2251,7 @@ function resignClicked() {
 function offerDrawClicked() {
   if (!state || state.over) return;
   if (mode === "matched") { sendGame({ t: "empate-oferta" }); toast("Proposta de empate enviada — aguardando o oponente."); }
+  else if (mode === "bot") toast("O computador não aceita empate — jogue até o fim ou desista.");
   else if (mode === "local") {
     if (confirm(COLOR_PT[state.turn] + " propõem empate. O adversário aceita?")) endBy("draw", null);
   } else {
@@ -2113,7 +2277,11 @@ function restart() {
 
 /* ---------- bootstrap ---------- */
 document.addEventListener("DOMContentLoaded", () => {
-  $("btnLocal").addEventListener("click", () => { mode = "local"; myColor = null; roomCode = ""; startGame(); });
+  $("btnBot").addEventListener("click", () => { $("botPicker").hidden = !$("botPicker").hidden; });
+  for (const b of document.querySelectorAll("#botPicker .tcbtn")) {
+    b.addEventListener("click", () => iniciarBot(parseInt(b.dataset.bot, 10)));
+  }
+  $("btnLocal").addEventListener("click", () => { mode = "local"; myColor = null; roomCode = ""; startGame(); botNivel = 0; });
   $("btnTreino").addEventListener("click", () => { mode = "local"; myColor = null; roomCode = ""; startGame(initialState("treino")); });
   $("btnHost").addEventListener("click", hostGame);
   $("btnShowJoin").addEventListener("click", () => { $("joinPanel").hidden = false; $("hostPanel").hidden = true; $("joinCode").focus(); });
