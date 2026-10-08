@@ -281,6 +281,11 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
         <button class="tcbtn" data-bot="2"><span class="big">😎</span>Nível 2<span class="sub">intermediário</span></button>
         <button class="tcbtn" data-bot="3"><span class="big">🤖</span>Nível 3<span class="sub">difícil</span></button>
       </div>
+      <div class="tcrow" style="margin-top:8px">
+        <button class="tcbtn" data-bot="4"><span class="big">🧠</span>Nível 4<span class="sub">muito forte</span></button>
+        <button class="tcbtn" data-bot="5"><span class="big">🏆</span>Nível 5<span class="sub">campeão</span></button>
+        <button class="tcbtn" data-bot="6"><span class="big">💀</span>Nível 6<span class="sub">máximo</span></button>
+      </div>
     </div>
     <button class="bigbtn ghost" id="btnLocal">💻 Dois jogadores no mesmo PC</button>
     <button class="bigbtn ghost" id="btnTreino">🎓 Modo treino — todas as cartas, moedas infinitas</button>
@@ -1494,7 +1499,80 @@ function escolherJogadaBot(s, nivel) {
   return melhor.a;
 }
 
-let botNivel = 0;        // 0 = sem bot; 1, 2 ou 3
+/* ---------- busca profunda (níveis 4, 5 e 6) ---------- */
+const PRAZO = { 4: 350, 5: 1100, 6: 2400 };     // tempo de pensamento, em ms
+const LARGURA = { 1: 10, 2: 14, 3: 18 };        // quantas ações olhar por profundidade
+const TEMPO_ESGOTADO = { tempo: true };
+
+// nota rápida para ordenar as ações (ordem boa = poda melhor)
+function notaRapida(s, a) {
+  if (a.kind === "move") {
+    const alvo = s.board[a.to[0]][a.to[1]];
+    let n = 0;
+    if (alvo && alvo.t && alvo.t !== "X") n += valorPeca(alvo) + 50;
+    const p = s.board[a.from[0]][a.from[1]];
+    if (p && p.t === "P" && (a.to[0] === 0 || a.to[0] === 7)) n += 700;   // promoção
+    return n;
+  }
+  if (a.kind === "card") return 40 - (CARD_COST[a.card] || 0) * 0.3;
+  return 5;   // comprar do monte
+}
+
+function ordenarAcoes(s, acoes, largura) {
+  const lista = acoes.map(a => ({ a: a, n: notaRapida(s, a) }));
+  lista.sort((x, y) => y.n - x.n);
+  return lista.slice(0, largura).map(x => x.a);
+}
+
+function negamax(s, prof, alfa, beta, prazo) {
+  if (Date.now() > prazo) throw TEMPO_ESGOTADO;
+  if (s.over || prof <= 0) return avaliar(s, s.turn);
+  const todas = acoesDoBot(s, true);
+  if (!todas.length) return avaliar(s, s.turn);
+  const acoes = ordenarAcoes(s, todas, LARGURA[Math.min(prof, 3)] || 10);
+  let melhor = -Infinity;
+  for (const a of acoes) {
+    const t = simular(s, a);
+    if (!t) continue;
+    const v = -negamax(t, prof - 1, -beta, -alfa, prazo);
+    if (v > melhor) melhor = v;
+    if (melhor > alfa) alfa = melhor;
+    if (alfa >= beta) break;          // poda
+  }
+  return melhor === -Infinity ? avaliar(s, s.turn) : melhor;
+}
+
+// aprofundamento progressivo: vai fundo enquanto houver tempo
+function buscaProfunda(s, nivel) {
+  const prazo = Date.now() + (PRAZO[nivel] || 800);
+  const profMax = nivel === 4 ? 3 : nivel === 5 ? 5 : 7;
+  const todas = acoesDoBot(s, true);
+  if (!todas.length) return null;
+  let melhorAcao = ordenarAcoes(s, todas, 1)[0];
+
+  for (let prof = 2; prof <= profMax; prof++) {
+    let alfa = -Infinity, achouNesta = null;
+    const acoes = ordenarAcoes(s, todas, LARGURA[3] + 6);
+    // a melhor da rodada anterior é testada primeiro
+    acoes.sort((x, y) => (y === melhorAcao ? 1 : 0) - (x === melhorAcao ? 1 : 0));
+    try {
+      for (const a of acoes) {
+        const t = simular(s, a);
+        if (!t) continue;
+        const v = -negamax(t, prof - 1, -Infinity, -alfa, prazo);
+        if (v > alfa) { alfa = v; achouNesta = a; }
+      }
+    } catch (e) {
+      if (e !== TEMPO_ESGOTADO) throw e;
+      break;                       // acabou o tempo: fica com o resultado da profundidade anterior
+    }
+    if (achouNesta) melhorAcao = achouNesta;
+    if (alfa > 50000) break;       // achou mate
+  }
+  return melhorAcao;
+}
+
+let botNivel = 0;        // 0 = sem bot; 1 a 6
 let botPensando = false;
 const BOT_COR = "b";     // o computador joga de pretas
 
@@ -1515,10 +1593,16 @@ function vezDoBot() {
 function jogarBot() {
   if (!vezDoBot() || botPensando) return;
   botPensando = true;
+  const nivel = botNivel;
+  const espera = nivel >= 5 ? 60 : 420;   // níveis fortes já demoram pensando
+  if (nivel >= 5) {
+    const st = $("status");
+    if (st) st.textContent = "O computador está pensando…";
+  }
   setTimeout(() => {
     try {
       if (!vezDoBot()) return;
-      const a = escolherJogadaBot(state, botNivel);
+      const a = nivel >= 4 ? buscaProfunda(state, nivel) : escolherJogadaBot(state, nivel);
       if (!a) return;
       const res = applyAction(state, a);
       if (!res.ok) return;
@@ -1527,7 +1611,7 @@ function jogarBot() {
     } finally {
       botPensando = false;
     }
-  }, 420);   // pequena pausa para parecer que pensou
+  }, espera);
 }
 
 /* ---------- helpers ---------- */
