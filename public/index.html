@@ -319,7 +319,7 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
       <b>🪙 Moedas</b> — cada carta tem um custo (base: Invocar Cavalo = 27). Você começa com <b>0 moedas</b> e ganha <b>+5 a cada lance</b>. Sem moedas, a carta não pode ser jogada — nem para escapar de xeque!<br>
       <b>🎴 Mão e monte</b> — cada jogador recebe <b>3 cartas sorteadas</b> (sem repetição entre os dois) e as 11 restantes formam o <b>monte</b>. No seu turno: <b>mover</b>, <b>usar carta</b> ou <b>comprar 1 do monte</b> (grátis, com menos de <b>3 cartas</b> na mão e fora de xeque). A mão do adversário fica <b>virada</b>.<br>
       <b>⏰ Rankeadas</b> — escolha <b>1, 3 ou 10 minutos</b>; você só enfrenta quem escolheu o mesmo formato, e o tempo esgotado é <b>derrota</b>.<br><br>
-      Cada peça pode carregar <b>no máximo UM efeito</b>. Reis e pedras sobrevivem a explosões (mas minas e bombas <b>podem matar reis</b> — veja acima). Peão promovido <b>escolhe</b> a peça. Só é xeque-mate se nem as cartas salvarem!
+      Cada peça pode carregar <b>no máximo UM efeito</b>. Reis e pedras sobrevivem a explosões (mas minas e bombas <b>podem matar reis</b> — veja acima). Peão promovido <b>escolhe</b> a peça — só ao chegar na <b>oitava fileira do adversário</b>; um peão com estilo que volte à própria primeira fileira <b>não</b> promove. Só é xeque-mate se nem as cartas salvarem!
     </div>
   </div>
 </div>
@@ -337,6 +337,7 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
         <button class="oval" id="btnResign">🏳️ Desistir</button>
         <button class="oval" id="btnOfferDraw">🤝 Propor empate</button>
         <button class="oval gold" id="btnRestart">↺ Nova partida</button>
+        <button class="oval" id="btnSom">🔊 Som</button>
         <button class="oval" id="btnMenu">Menu</button>
       </div>
       <div id="deckcol">
@@ -828,7 +829,9 @@ function execMove(s, m, promoPiece) {
   }
   s.board[tr][tc] = p;
   s.board[r][c] = null;
-  if (m.promo || (p.t === "P" && (tr === 0 || tr === 7))) {
+  // promove só na oitava fileira DO ADVERSÁRIO: um peão com estilo que volte
+  // à própria primeira fileira não vira peça nova
+  if (m.promo || (p.t === "P" && tr === (p.c === "w" ? 0 : 7))) {
     const np = { t: promoPiece || "Q", c: p.c };
     if (p.st) np.st = p.st;
     if (p.ar) np.ar = p.ar;
@@ -1243,7 +1246,7 @@ function notaRapida(s, a) {
     let n = 0;
     if (alvo && alvo.t && alvo.t !== "X") n += valorPeca(alvo) + 50;
     const p = s.board[a.from[0]][a.from[1]];
-    if (p && p.t === "P" && (a.to[0] === 0 || a.to[0] === 7)) n += 700;   // promoção
+    if (p && p.t === "P" && a.to[0] === (p.c === "w" ? 0 : 7)) n += 700;   // promoção
     return n;
   }
   if (a.kind === "card") return 40 - (CARD_COST[a.card] || 0) * 0.3;
@@ -1722,7 +1725,7 @@ function iaLances(s, soCapturas) {
       let nota = 0;
       if (captura && alvo) nota = iaValor(alvo) * 10 - (IA_VAL[p.t] || 0);
       else if (captura) nota = 900;
-      if (m.promo || (p.t === "P" && (m.to[0] === 0 || m.to[0] === 7))) nota += 8000;
+      if (m.promo || (p.t === "P" && m.to[0] === (p.c === "w" ? 0 : 7))) nota += 8000;
       out.push({ kind: "move", from: m.from, to: m.to, promo: "Q", m: m, nota: nota, cap: captura });
     }
   }
@@ -2274,9 +2277,10 @@ function connectWS() {
       toast("Partida encontrada (" + (TC_LABEL[matchTC] || "") + ")! Você joga de " + COLOR_PT[myColor] + " contra " + opponent.nome + " (⭐" + opponent.rating + ").");
     }
     else if (m.t === "action") {
+      const nLog = state.log.length;
       const res = applyAction(state, m.action);
       if (m.clock) { clocks = m.clock; clockSyncAt = Date.now(); }
-      if (res.ok) { clearSelection(); render(); if (res.check && state.turn === myColor && !state.over) toast("Xeque!"); }
+      if (res.ok) { somDoLance(nLog); clearSelection(); render(); if (res.check && state.turn === myColor && !state.over) toast("Xeque!"); }
     }
     else if (m.t === "clock") { clocks = m.clock; clockSyncAt = Date.now(); renderClocks(); }
     else if (m.t === "invalido") { state = m.state; if (m.clock) { clocks = m.clock; clockSyncAt = Date.now(); } clearSelection(); render(); toast("Jogada rejeitada pelo servidor — tabuleiro sincronizado."); }
@@ -2406,8 +2410,10 @@ function jogarBot() {
     setTimeout(() => {
       try {
         if (!vezDoBot() || state !== alvo || !a) return;
+        const nLog = state.log.length;
         const res = applyAction(state, a);
         if (!res.ok) return;
+        somDoLance(nLog);
         clearSelection();
         render();
       } finally {
@@ -2467,6 +2473,102 @@ function pensarBot(s, nivel) {
       resolve(escolherJogadaBot(s, 3));
     }, 40000);
   });
+}
+
+/* ---------- sons (gerados na hora, sem arquivos) ---------- */
+let somLigado = true;
+try { somLigado = localStorage.getItem("ct_som") !== "0"; } catch (e) {}
+let audioCtx = null, ruidoBuf = null;
+
+function audio() {
+  if (audioCtx !== null) return audioCtx;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    audioCtx = AC ? new AC() : false;
+  } catch (e) { audioCtx = false; }
+  return audioCtx;
+}
+function fonteRuido(ac) {
+  if (!ruidoBuf) {
+    const n = Math.floor(ac.sampleRate * 0.6);
+    ruidoBuf = ac.createBuffer(1, n, ac.sampleRate);
+    const d = ruidoBuf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  }
+  const src = ac.createBufferSource();
+  src.buffer = ruidoBuf;
+  return src;
+}
+function tocar(tipo) {
+  if (!somLigado) return;
+  const ac = audio();
+  if (!ac) return;
+  try {
+    if (ac.state === "suspended") ac.resume();
+    const t = ac.currentTime;
+    const saida = ac.createGain();
+    saida.gain.value = 0.85;
+    saida.connect(ac.destination);
+
+    // envelope: sobe rápido e cai
+    const env = (g, pico, dur, atq, atraso) => {
+      const t0 = t + (atraso || 0);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(pico, t0 + (atq || 0.004));
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    };
+    // estalo: ruído passado por um filtro
+    const estalo = (freqIni, freqFim, q, pico, dur, atraso) => {
+      const n = fonteRuido(ac), f = ac.createBiquadFilter(), g = ac.createGain();
+      f.type = freqFim < freqIni && freqFim < 400 ? "lowpass" : "bandpass";
+      f.frequency.setValueAtTime(freqIni, t + (atraso || 0));
+      f.frequency.exponentialRampToValueAtTime(freqFim, t + (atraso || 0) + dur);
+      f.Q.value = q;
+      env(g, pico, dur, 0.004, atraso);
+      n.connect(f); f.connect(g); g.connect(saida);
+      n.start(t + (atraso || 0)); n.stop(t + (atraso || 0) + dur + 0.05);
+    };
+    // tom
+    const tom = (onda, fIni, fFim, pico, dur, atraso) => {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = onda;
+      o.frequency.setValueAtTime(fIni, t + (atraso || 0));
+      o.frequency.exponentialRampToValueAtTime(fFim, t + (atraso || 0) + dur);
+      env(g, pico, dur, 0.006, atraso);
+      o.connect(g); g.connect(saida);
+      o.start(t + (atraso || 0)); o.stop(t + (atraso || 0) + dur + 0.05);
+    };
+
+    if (tipo === "lance") {                 // peça batendo na madeira
+      estalo(1800, 1200, 1.1, 0.30, 0.07);
+      tom("sine", 240, 95, 0.22, 0.09);
+    } else if (tipo === "captura") {        // mais seco e mais forte
+      estalo(1100, 600, 0.9, 0.45, 0.14);
+      tom("triangle", 300, 70, 0.30, 0.16);
+      estalo(2200, 1500, 1.4, 0.20, 0.05, 0.05);
+    } else if (tipo === "carta") {          // carta deslizando + sininho
+      estalo(700, 3400, 0.8, 0.20, 0.18, 0);
+      tom("triangle", 1046, 1568, 0.16, 0.22, 0.07);
+    } else if (tipo === "compra") {         // carta saindo do monte
+      estalo(3200, 800, 0.8, 0.22, 0.20);
+      estalo(1600, 1100, 1.2, 0.16, 0.05, 0.19);
+    } else if (tipo === "explosao") {       // mina / torre bomba
+      estalo(1800, 120, 0.7, 0.55, 0.45);
+      tom("sine", 90, 35, 0.45, 0.40);
+    }
+  } catch (e) {}
+}
+// descobre o som certo a partir do que o motor escreveu no registro de lances
+function somDoLance(idx) {
+  const e = state && state.log && state.log[idx];
+  if (!e) return;
+  const t = e.txt || "";
+  const boom = t.indexOf("💥") >= 0;
+  if (t.indexOf("🂠") === 0) tocar("compra");
+  else if (t.indexOf("Carta:") >= 0) tocar("carta");
+  else if (t.indexOf("×") >= 0 || t.indexOf("🎯") === 0 || t.indexOf("🛡️") === 0) tocar("captura");
+  else tocar("lance");
+  if (boom) setTimeout(() => tocar("explosao"), 90);
 }
 
 /* ---------- helpers ---------- */
@@ -2608,8 +2710,10 @@ function onMsg(msg) {
     startGame(msg.state);
     toast("Partida iniciada! Você joga de " + COLOR_PT[myColor] + ".");
   } else if (msg.type === "action") {
+    const nLog = state.log.length;
     const res = applyAction(state, msg.action);
     if (!res.ok) { conn.send({ type: "sync-req" }); return; }
+    somDoLance(nLog);
     clearSelection();
     render();
     if (res.check && state.turn === myColor && !state.over) toast("Xeque!");
@@ -2639,8 +2743,10 @@ function onMsg(msg) {
   }
 }
 function doAction(a) {
+  const nLog = state.log.length;
   const res = applyAction(state, a);
   if (!res.ok) { toast(res.error || "Jogada inválida."); return false; }
+  somDoLance(nLog);
   if (conn) conn.send({ type: "action", action: a });
   else if (mode === "matched") sendGame({ t: "action", action: a });
   clearSelection();
@@ -3228,6 +3334,13 @@ document.addEventListener("DOMContentLoaded", () => {
   $("joinCode").addEventListener("keydown", (e) => { if (e.key === "Enter") joinGame($("joinCode").value); });
   $("btnCopy").addEventListener("click", () => {
     navigator.clipboard && navigator.clipboard.writeText($("hostCode").textContent).then(() => toast("Código copiado!"));
+  });
+  $("btnSom").textContent = somLigado ? "🔊 Som" : "🔇 Som";
+  $("btnSom").addEventListener("click", () => {
+    somLigado = !somLigado;
+    try { localStorage.setItem("ct_som", somLigado ? "1" : "0"); } catch (e) {}
+    $("btnSom").textContent = somLigado ? "🔊 Som" : "🔇 Som";
+    if (somLigado) tocar("lance");
   });
   $("btnRestart").addEventListener("click", restart);
   $("btnMenu").addEventListener("click", () => {
