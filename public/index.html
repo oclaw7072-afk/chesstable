@@ -283,8 +283,8 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
       </div>
       <div class="tcrow" style="margin-top:8px">
         <button class="tcbtn" data-bot="4"><span class="big">🧠</span>Nível 4<span class="sub">muito forte</span></button>
-        <button class="tcbtn" data-bot="5"><span class="big">🏆</span>Nível 5<span class="sub">campeão</span></button>
-        <button class="tcbtn" data-bot="6"><span class="big">💀</span>Nível 6<span class="sub">máximo</span></button>
+        <button class="tcbtn" data-bot="5"><span class="big">🏆</span>Nível 5<span class="sub">mestre — pensa 4s</span></button>
+        <button class="tcbtn" data-bot="6"><span class="big">💀</span>Nível 6<span class="sub">máximo — pensa 10s</span></button>
       </div>
     </div>
     <button class="bigbtn ghost" id="btnLocal">💻 Dois jogadores no mesmo PC</button>
@@ -385,7 +385,7 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
 
 <div id="toast"></div>
 
-<script>
+<script id="motor">
 /* ============================================================
    Xadrez com Cartas — Motor (lógica pura, sem DOM)
    Peça:  {t:'P'|'N'|'B'|'R'|'Q'|'K', c:'w'|'b',
@@ -1114,6 +1114,993 @@ if (typeof module !== "undefined" && module.exports) {
 }
 
 </script>
+<script id="motorIA">
+/* ============================================================
+   chesstable — cérebro do computador (níveis 1 a 6)
+   Este bloco não toca na tela: ele é copiado inteiro para dentro
+   de um Web Worker, para o computador pensar sem travar a página.
+   ============================================================ */
+/* ---------- bot (jogar contra o computador) ---------- */
+const VAL_PECA = { P: 100, N: 300, B: 320, R: 500, Q: 900, K: 0 };
+
+function valorPeca(p) {
+  let v = VAL_PECA[p.t] || 0;
+  if (p.st) for (const t in p.st) if (p.st[t] && t !== p.t) v += Math.round((VAL_PECA[t] || 0) * 0.45);
+  if (p.sn) v += 120;          // bispo atirador
+  if (p.bm) v += 90;           // torre bomba
+  if (p.ar) v += 110;          // armadura
+  return v;
+}
+
+// quanto a posição vale para 'col' (positivo = melhor para col)
+function avaliar(s, col) {
+  if (s.over) {
+    if (s.over.result === "draw" || s.over.result === "stalemate") return 0;
+    return s.over.winner === col ? 100000 : -100000;
+  }
+  let v = 0;
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = s.board[r][c];
+    if (!p || !p.t || p.t === "X") continue;
+    v += (p.c === col ? 1 : -1) * valorPeca(p);
+  }
+  if (s.variant !== "treino") v += (s.coins[col] - s.coins[enemy(col)]) * 0.8;
+  if (inCheck(s, enemy(col))) v += 35;
+  if (inCheck(s, col)) v -= 45;
+  return v;
+}
+
+// todas as ações possíveis de quem está na vez
+function acoesDoBot(s, incluirCartas) {
+  const out = [];
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = s.board[r][c];
+    if (!p || !p.t || p.c !== s.turn) continue;
+    for (const m of legalMovesFor(s, r, c)) {
+      out.push({ kind: "move", from: [r, c], to: [m.to[0], m.to[1]], promo: "Q" });
+    }
+  }
+  if (incluirCartas) {
+    for (const key of CARD_KEYS) {
+      if (!s.cards[s.turn][key] || !canAfford(s, key)) continue;
+      for (const at of cardTargets(s, key)) out.push({ kind: "card", card: key, at: at });
+    }
+    if (canDraw(s)) out.push({ kind: "draw" });
+  }
+  return out;
+}
+
+function simular(s, a) {
+  const t = cloneState(s);
+  t.log = [];          // cloneState compartilha o log: a simulação precisa do seu próprio
+  const r = applyAction(t, a);
+  return r.ok ? t : null;
+}
+
+function escolherJogadaBot(s, nivel) {
+  const col = s.turn;
+  const acoes = acoesDoBot(s, true);
+  if (!acoes.length) return null;
+
+  // nível 1: quase aleatório, mas costuma aproveitar capturas simples
+  if (nivel === 1) {
+    if (Math.random() < 0.65) {
+      const capturas = acoes.filter(a => a.kind === "move" && s.board[a.to[0]][a.to[1]] && s.board[a.to[0]][a.to[1]].t);
+      if (capturas.length) return capturas[Math.floor(Math.random() * capturas.length)];
+    }
+    return acoes[Math.floor(Math.random() * acoes.length)];
+  }
+
+  // pontua cada ação pelo resultado imediato
+  const pontuadas = [];
+  for (const a of acoes) {
+    const t = simular(s, a);
+    if (!t) continue;
+    pontuadas.push({ a: a, t: t, v: avaliar(t, col) });
+  }
+  if (!pontuadas.length) return acoes[0];
+  pontuadas.sort((x, y) => y.v - x.v);
+
+  if (nivel === 2) {
+    // melhor jogada imediata, com desempate aleatório entre as quase iguais
+    const topo = pontuadas.filter(p => p.v >= pontuadas[0].v - 8);
+    return topo[Math.floor(Math.random() * topo.length)].a;
+  }
+
+  // nível 3: olha também a melhor resposta do adversário (2 lances)
+  const candidatos = pontuadas.slice(0, 14);
+  let melhor = candidatos[0], melhorV = -Infinity;
+  for (const cand of candidatos) {
+    if (cand.t.over) {
+      const v = avaliar(cand.t, col);
+      if (v > melhorV) { melhorV = v; melhor = cand; }
+      continue;
+    }
+    const respostas = acoesDoBot(cand.t, true).slice(0, 40);
+    let pior = Infinity;
+    for (const rp of respostas) {
+      const t2 = simular(cand.t, rp);
+      if (!t2) continue;
+      const v = avaliar(t2, col);
+      if (v < pior) pior = v;
+      if (pior <= melhorV - 400) break;   // já é ruim demais
+    }
+    if (pior === Infinity) pior = cand.v;
+    if (pior > melhorV) { melhorV = pior; melhor = cand; }
+  }
+  return melhor.a;
+}
+
+/* ---------- busca profunda (níveis 4, 5 e 6) ---------- */
+const PRAZO = { 4: 350, 5: 1100, 6: 2400 };     // tempo de pensamento, em ms
+const LARGURA = { 1: 10, 2: 14, 3: 18 };        // quantas ações olhar por profundidade
+const TEMPO_ESGOTADO = { tempo: true };
+
+// nota rápida para ordenar as ações (ordem boa = poda melhor)
+function notaRapida(s, a) {
+  if (a.kind === "move") {
+    const alvo = s.board[a.to[0]][a.to[1]];
+    let n = 0;
+    if (alvo && alvo.t && alvo.t !== "X") n += valorPeca(alvo) + 50;
+    const p = s.board[a.from[0]][a.from[1]];
+    if (p && p.t === "P" && (a.to[0] === 0 || a.to[0] === 7)) n += 700;   // promoção
+    return n;
+  }
+  if (a.kind === "card") return 40 - (CARD_COST[a.card] || 0) * 0.3;
+  return 5;   // comprar do monte
+}
+
+function ordenarAcoes(s, acoes, largura) {
+  const lista = acoes.map(a => ({ a: a, n: notaRapida(s, a) }));
+  lista.sort((x, y) => y.n - x.n);
+  return lista.slice(0, largura).map(x => x.a);
+}
+
+function negamax(s, prof, alfa, beta, prazo) {
+  if (Date.now() > prazo) throw TEMPO_ESGOTADO;
+  if (s.over || prof <= 0) return avaliar(s, s.turn);
+  const todas = acoesDoBot(s, true);
+  if (!todas.length) return avaliar(s, s.turn);
+  const acoes = ordenarAcoes(s, todas, LARGURA[Math.min(prof, 3)] || 10);
+  let melhor = -Infinity;
+  for (const a of acoes) {
+    const t = simular(s, a);
+    if (!t) continue;
+    const v = -negamax(t, prof - 1, -beta, -alfa, prazo);
+    if (v > melhor) melhor = v;
+    if (melhor > alfa) alfa = melhor;
+    if (alfa >= beta) break;          // poda
+  }
+  return melhor === -Infinity ? avaliar(s, s.turn) : melhor;
+}
+
+// aprofundamento progressivo: vai fundo enquanto houver tempo
+function buscaProfunda(s, nivel) {
+  const prazo = Date.now() + (PRAZO[nivel] || 800);
+  const profMax = nivel === 4 ? 3 : nivel === 5 ? 5 : 7;
+  const todas = acoesDoBot(s, true);
+  if (!todas.length) return null;
+  let melhorAcao = ordenarAcoes(s, todas, 1)[0];
+
+  for (let prof = 2; prof <= profMax; prof++) {
+    let alfa = -Infinity, achouNesta = null;
+    const acoes = ordenarAcoes(s, todas, LARGURA[3] + 6);
+    // a melhor da rodada anterior é testada primeiro
+    acoes.sort((x, y) => (y === melhorAcao ? 1 : 0) - (x === melhorAcao ? 1 : 0));
+    try {
+      for (const a of acoes) {
+        const t = simular(s, a);
+        if (!t) continue;
+        const v = -negamax(t, prof - 1, -Infinity, -alfa, prazo);
+        if (v > alfa) { alfa = v; achouNesta = a; }
+      }
+    } catch (e) {
+      if (e !== TEMPO_ESGOTADO) throw e;
+      break;                       // acabou o tempo: fica com o resultado da profundidade anterior
+    }
+    if (achouNesta) melhorAcao = achouNesta;
+    if (alfa > 50000) break;       // achou mate
+  }
+  return melhorAcao;
+}
+
+/* ============================================================
+   chesstable — IA dos níveis 5 e 6
+   Busca alfa-beta com as técnicas que os motores de xadrez
+   fortes (Stockfish e companhia) usam, adaptadas às regras
+   daqui: cartas, moedas, minas, estilos, bomba e armadura.
+   ============================================================ */
+
+const IA_MATE = 100000;
+const IA_TEMPO = { tempo: true };
+const IA_MARGEM = 260;   // folga da avaliação preguiçosa
+
+/* ---------- valores ---------- */
+const IA_VAL = { P: 100, N: 325, B: 340, R: 510, Q: 950, K: 0, X: 0 };
+
+// tabelas de casas (ponto de vista das brancas; linha 0 = 8ª fileira)
+const IA_PST = {
+  P: [ 0,  0,  0,  0,  0,  0,  0,  0,
+      50, 50, 50, 50, 50, 50, 50, 50,
+      10, 10, 20, 30, 30, 20, 10, 10,
+       5,  5, 10, 25, 25, 10,  5,  5,
+       0,  0,  0, 20, 20,  0,  0,  0,
+       5, -5,-10,  0,  0,-10, -5,  5,
+       5, 10, 10,-20,-20, 10, 10,  5,
+       0,  0,  0,  0,  0,  0,  0,  0],
+  N: [-50,-40,-30,-30,-30,-30,-40,-50,
+      -40,-20,  0,  0,  0,  0,-20,-40,
+      -30,  0, 10, 15, 15, 10,  0,-30,
+      -30,  5, 15, 20, 20, 15,  5,-30,
+      -30,  0, 15, 20, 20, 15,  0,-30,
+      -30,  5, 10, 15, 15, 10,  5,-30,
+      -40,-20,  0,  5,  5,  0,-20,-40,
+      -50,-40,-30,-30,-30,-30,-40,-50],
+  B: [-20,-10,-10,-10,-10,-10,-10,-20,
+      -10,  0,  0,  0,  0,  0,  0,-10,
+      -10,  0,  5, 10, 10,  5,  0,-10,
+      -10,  5,  5, 10, 10,  5,  5,-10,
+      -10,  0, 10, 10, 10, 10,  0,-10,
+      -10, 10, 10, 10, 10, 10, 10,-10,
+      -10,  5,  0,  0,  0,  0,  5,-10,
+      -20,-10,-10,-10,-10,-10,-10,-20],
+  R: [  0,  0,  0,  0,  0,  0,  0,  0,
+        5, 10, 10, 10, 10, 10, 10,  5,
+       -5,  0,  0,  0,  0,  0,  0, -5,
+       -5,  0,  0,  0,  0,  0,  0, -5,
+       -5,  0,  0,  0,  0,  0,  0, -5,
+       -5,  0,  0,  0,  0,  0,  0, -5,
+       -5,  0,  0,  0,  0,  0,  0, -5,
+        0,  0,  0,  5,  5,  0,  0,  0],
+  Q: [-20,-10,-10, -5, -5,-10,-10,-20,
+      -10,  0,  0,  0,  0,  0,  0,-10,
+      -10,  0,  5,  5,  5,  5,  0,-10,
+       -5,  0,  5,  5,  5,  5,  0, -5,
+        0,  0,  5,  5,  5,  5,  0, -5,
+      -10,  5,  5,  5,  5,  5,  0,-10,
+      -10,  0,  5,  0,  0,  0,  0,-10,
+      -20,-10,-10, -5, -5,-10,-10,-20]
+};
+const IA_PST_K_MEIO = [
+  -30,-40,-40,-50,-50,-40,-40,-30,
+  -30,-40,-40,-50,-50,-40,-40,-30,
+  -30,-40,-40,-50,-50,-40,-40,-30,
+  -30,-40,-40,-50,-50,-40,-40,-30,
+  -20,-30,-30,-40,-40,-30,-30,-20,
+  -10,-20,-20,-20,-20,-20,-20,-10,
+   20, 20,  0,  0,  0,  0, 20, 20,
+   20, 30, 10,  0,  0, 10, 30, 20];
+const IA_PST_K_FIM = [
+  -50,-40,-30,-20,-20,-30,-40,-50,
+  -30,-20,-10,  0,  0,-10,-20,-30,
+  -30,-10, 20, 30, 30, 20,-10,-30,
+  -30,-10, 30, 40, 40, 30,-10,-30,
+  -30,-10, 30, 40, 40, 30,-10,-30,
+  -30,-10, 20, 30, 30, 20,-10,-30,
+  -30,-30,  0,  0,  0,  0,-30,-30,
+  -50,-30,-30,-30,-30,-30,-30,-50];
+
+// quanto vale uma peça com os extras deste jogo
+function iaValor(p) {
+  let v = IA_VAL[p.t] || 0;
+  if (p.st) for (const t in p.st) if (p.st[t] && t !== p.t) v += (IA_VAL[t] || 0) * 0.55;
+  if (p.sh) v += 130;          // bispo atirador
+  if (p.bm) v += 120;          // torre bomba
+  if (p.ar) v += 150;          // armadura de espinhos
+  return v;
+}
+
+/* ---------- xeque rápido ---------- */
+// Caminho rápido só quando não há minas nem torres bomba no tabuleiro:
+// aí "estar em xeque" é exatamente "alguma peça inimiga ataca o rei", e dá
+// para olhar a partir do rei para fora em vez de varrer as 64 casas.
+const IA_DIRS = [[-1,-1],[-1,1],[1,-1],[1,1],[-1,0],[1,0],[0,-1],[0,1]];
+const IA_SALTOS = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
+
+function iaTemTipo(p, t) { return p.t === t || (p.st && p.st[t]); }
+
+// posição dos dois reis, guardada no próprio estado (cada estado da busca é novo)
+function iaReis(s) {
+  let k = s._reis;
+  if (k === undefined) {
+    const b = s.board;
+    let kw = -1, kb = -1;
+    for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+      const p = b[r][c];
+      if (p && p.t === "K") { if (p.c === "w") kw = r * 8 + c; else kb = r * 8 + c; }
+    }
+    k = s._reis = [kw, kb];
+  }
+  return k;
+}
+function iaRei(s, col) { return iaReis(s)[col === "w" ? 0 : 1]; }
+
+function iaTemBombaNoTabuleiro(s) {
+  const b = s.board;
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = b[r][c];
+    if (p && p.bm) return true;
+  }
+  return false;
+}
+
+// o resultado fica guardado no estado (cada estado da busca é usado e descartado)
+function iaXeque(s, col) {
+  if (col === "w") { if (s._xqw === undefined) s._xqw = iaXequeCalc(s, "w"); return s._xqw; }
+  if (s._xqb === undefined) s._xqb = iaXequeCalc(s, "b");
+  return s._xqb;
+}
+function iaXequeCalc(s, col) {
+  if (s.mines.length || s._bomba !== false) {
+    if (s._bomba === undefined) s._bomba = iaTemBombaNoTabuleiro(s);
+    if (s.mines.length || s._bomba) return inCheck(s, col);
+  }
+  const b = s.board;
+  const k = iaRei(s, col);
+  if (k < 0) return false;
+  const kr = k >> 3, kc = k & 7, opp = col === "w" ? "b" : "w";
+
+  for (const d of IA_SALTOS) {
+    const r = kr + d[0], c = kc + d[1];
+    if (r < 0 || r > 7 || c < 0 || c > 7) continue;
+    const q = b[r][c];
+    if (q && q.t !== "X" && q.c === opp && iaTemTipo(q, "N")) return true;
+  }
+  for (let i = 0; i < 8; i++) {
+    const d = IA_DIRS[i], diag = i < 4;
+    let r = kr + d[0], c = kc + d[1], passo = 1;
+    while (r >= 0 && r <= 7 && c >= 0 && c <= 7) {
+      const q = b[r][c];
+      if (q) {
+        if (q.t !== "X" && q.c === opp) {
+          if (diag) {
+            if (iaTemTipo(q, "B") || iaTemTipo(q, "Q")) return true;
+            if (passo === 1) {
+              if (iaTemTipo(q, "K")) return true;
+              if (q.t === "P" && r === kr - (opp === "w" ? -1 : 1)) return true;
+            }
+          } else {
+            if (iaTemTipo(q, "R") || iaTemTipo(q, "Q")) return true;
+            if (passo === 1 && iaTemTipo(q, "K")) return true;
+          }
+        }
+        break;
+      }
+      r += d[0]; c += d[1]; passo++;
+    }
+  }
+  return false;
+}
+
+/* ---------- avaliação ---------- */
+const IA_DIAG = [[-1,-1],[-1,1],[1,-1],[1,1]];
+const IA_RETO = [[-1,0],[1,0],[0,-1],[0,1]];
+const IA_PESO_MOB = { P: 0, N: 4, B: 4, R: 2, Q: 1, K: 0 };
+
+// mobilidade aproximada (rápida): casas alcançáveis, sem checar xeque
+function iaMobilidade(b, r, c, p) {
+  let n = 0;
+  if (iaTemTipo(p, "N")) {
+    for (let i = 0; i < 8; i++) {
+      const rr = r + IA_SALTOS[i][0], cc = c + IA_SALTOS[i][1];
+      if (rr < 0 || rr > 7 || cc < 0 || cc > 7) continue;
+      const q = b[rr][cc];
+      if (!q || (q.t !== "X" && q.c !== p.c)) n++;
+    }
+  }
+  const diag = iaTemTipo(p, "B") || iaTemTipo(p, "Q");
+  const reto = iaTemTipo(p, "R") || iaTemTipo(p, "Q");
+  for (let i = 0; i < 8; i++) {
+    if (i < 4 ? !diag : !reto) continue;
+    const d = IA_DIRS[i];
+    let rr = r + d[0], cc = c + d[1];
+    while (rr >= 0 && rr <= 7 && cc >= 0 && cc <= 7) {
+      const q = b[rr][cc];
+      if (!q) { n++; rr += d[0]; cc += d[1]; continue; }
+      if (q.t !== "X" && q.c !== p.c) n++;
+      break;
+    }
+  }
+  return n;
+}
+
+// valor de moedas e cartas na mão
+function iaBolsa(s) {
+  let sc = (s.coins.w - s.coins.b) * 0.7;
+  for (let i = 0; i < CARD_KEYS.length; i++) {
+    const k = CARD_KEYS[i], custo = CARD_COST[k] || 0;
+    if (s.cards.w[k]) sc += 14 + (s.coins.w >= custo ? custo * 0.22 : 0);
+    if (s.cards.b[k]) sc -= 14 + (s.coins.b >= custo ? custo * 0.22 : 0);
+  }
+  return sc;
+}
+
+// avaliação barata: material + tabelas de casas + bolsa
+function iaAvaliarRapido(s, col) {
+  const b = s.board;
+  let sc = 0, fase = 0, kw = -1, kb = -1;
+  for (let r = 0; r < 8; r++) {
+    const linha = b[r];
+    for (let c = 0; c < 8; c++) {
+      const p = linha[c];
+      if (!p || p.t === "X") continue;
+      if (p.t === "K") { if (p.c === "w") kw = r * 8 + c; else kb = (7 - r) * 8 + c; continue; }
+      const branca = p.c === "w";
+      const v = iaValor(p);
+      if (p.t !== "P") fase += IA_VAL[p.t] || 0;
+      const tab = IA_PST[p.t];
+      const t = v + (tab ? tab[(branca ? r : 7 - r) * 8 + c] : 0);
+      sc += branca ? t : -t;
+    }
+  }
+  let ab = fase / 6600; if (ab > 1) ab = 1;
+  if (kw >= 0) sc += IA_PST_K_MEIO[kw] * ab + IA_PST_K_FIM[kw] * (1 - ab);
+  if (kb >= 0) sc -= IA_PST_K_MEIO[kb] * ab + IA_PST_K_FIM[kb] * (1 - ab);
+  sc += iaBolsa(s);
+  return col === "w" ? sc : -sc;
+}
+
+const IA_PEOES_W = new Int8Array(8), IA_PEOES_B = new Int8Array(8);
+
+function iaAvaliar(s, col) {
+  const b = s.board;
+  let sc = 0, fase = 0, kwr = -1, kwc = -1, kbr = -1, kbc = -1;
+  let bispoW = 0, bispoB = 0;
+  for (let i = 0; i < 8; i++) { IA_PEOES_W[i] = 0; IA_PEOES_B[i] = 0; }
+
+  for (let r = 0; r < 8; r++) {
+    const linha = b[r];
+    for (let c = 0; c < 8; c++) {
+      const p = linha[c];
+      if (!p || p.t === "X") continue;
+      const branca = p.c === "w";
+      if (p.t === "K") { if (branca) { kwr = r; kwc = c; } else { kbr = r; kbc = c; } continue; }
+      const v = iaValor(p);
+      if (p.t !== "P") fase += IA_VAL[p.t] || 0;
+      if (p.t === "P") { if (branca) IA_PEOES_W[c]++; else IA_PEOES_B[c]++; }
+      if (p.t === "B") { if (branca) bispoW++; else bispoB++; }
+      const tab = IA_PST[p.t];
+      let t = v + (tab ? tab[(branca ? r : 7 - r) * 8 + c] : 0);
+      const peso = IA_PESO_MOB[p.t] || 0;
+      if (peso) t += peso * iaMobilidade(b, r, c, p);
+      sc += branca ? t : -t;
+    }
+  }
+  let ab = fase / 6600; if (ab > 1) ab = 1;
+  if (kwr >= 0) { const i = kwr * 8 + kwc; sc += IA_PST_K_MEIO[i] * ab + IA_PST_K_FIM[i] * (1 - ab); }
+  if (kbr >= 0) { const i = (7 - kbr) * 8 + kbc; sc -= IA_PST_K_MEIO[i] * ab + IA_PST_K_FIM[i] * (1 - ab); }
+  if (bispoW >= 2) sc += 35;
+  if (bispoB >= 2) sc -= 35;
+
+  // estrutura de peões
+  for (let c = 0; c < 8; c++) {
+    const w = IA_PEOES_W[c], bl = IA_PEOES_B[c];
+    if (w) {
+      if (w > 1) sc -= 14 * (w - 1);
+      if (!(c > 0 ? IA_PEOES_W[c - 1] : 0) && !(c < 7 ? IA_PEOES_W[c + 1] : 0)) sc -= 16;
+    }
+    if (bl) {
+      if (bl > 1) sc += 14 * (bl - 1);
+      if (!(c > 0 ? IA_PEOES_B[c - 1] : 0) && !(c < 7 ? IA_PEOES_B[c + 1] : 0)) sc += 16;
+    }
+  }
+
+  // peões passados
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = b[r][c];
+    if (!p || p.t !== "P") continue;
+    const branca = p.c === "w", dir = branca ? -1 : 1;
+    let livre = true;
+    for (let rr = r + dir; rr >= 0 && rr <= 7 && livre; rr += dir) {
+      for (let cc = c - 1; cc <= c + 1; cc++) {
+        if (cc < 0 || cc > 7) continue;
+        const q = b[rr][cc];
+        if (q && q.t === "P" && q.c !== p.c) { livre = false; break; }
+      }
+    }
+    if (livre) {
+      const av = branca ? 6 - r : r - 1;
+      const bonus = 12 + av * av * 4;
+      sc += branca ? bonus : -bonus;
+    }
+  }
+
+  // segurança dos reis
+  if (ab > 0.05) {
+    for (let lado = 0; lado < 2; lado++) {
+      const branca = lado === 0;
+      const kr = branca ? kwr : kbr, kc = branca ? kwc : kbc;
+      if (kr < 0) continue;
+      const cor = branca ? "w" : "b";
+      let perigo = 0;
+      for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+        const p = b[r][c];
+        if (!p || p.t === "X" || p.c === cor || p.t === "K") continue;
+        const dr = r - kr, dc = c - kc;
+        const d = (dr < 0 ? -dr : dr) > (dc < 0 ? -dc : dc) ? (dr < 0 ? -dr : dr) : (dc < 0 ? -dc : dc);
+        if (d <= 2) perigo += 6 + (IA_VAL[p.t] || 0) / 90 + (p.bm ? 45 : 0);
+        else if (d === 3) perigo += 2;
+      }
+      for (const m of s.mines) {
+        const dr = m.at[0] - kr, dc = m.at[1] - kc;
+        const d = (dr < 0 ? -dr : dr) > (dc < 0 ? -dc : dc) ? (dr < 0 ? -dr : dr) : (dc < 0 ? -dc : dc);
+        if (d <= 2) perigo += m.c === cor ? 6 : 30;
+      }
+      let escudo = 0;
+      const dir = branca ? -1 : 1, rr = kr + dir;
+      if (rr >= 0 && rr <= 7) for (let dc = -1; dc <= 1; dc++) {
+        const cc = kc + dc;
+        if (cc < 0 || cc > 7) continue;
+        const q = b[rr][cc];
+        if (q && q.t === "P" && q.c === cor) escudo++;
+      }
+      const t = (escudo * 12 - perigo) * ab;
+      sc += branca ? t : -t;
+    }
+  }
+
+  sc += iaBolsa(s);
+  return col === "w" ? sc : -sc;
+}
+
+/* ---------- clone rápido ---------- */
+function iaClonar(s) {
+  const b = s.board, nb = new Array(8);
+  for (let r = 0; r < 8; r++) {
+    const row = b[r], nr = new Array(8);
+    for (let c = 0; c < 8; c++) {
+      const p = row[c];
+      if (!p) { nr[c] = null; continue; }
+      const q = {};
+      for (const k in p) q[k] = p[k];
+      if (p.st) { const st = {}; for (const k in p.st) st[k] = p.st[k]; q.st = st; }
+      nr[c] = q;
+    }
+    nb[r] = nr;
+  }
+  const mn = s.mines, nm = new Array(mn.length);
+  for (let i = 0; i < mn.length; i++) nm[i] = { at: [mn[i].at[0], mn[i].at[1]], c: mn[i].c };
+  return {
+    board: nb,
+    turn: s.turn,
+    castling: { w: { k: s.castling.w.k, q: s.castling.w.q }, b: { k: s.castling.b.k, q: s.castling.b.q } },
+    ep: s.ep ? [s.ep[0], s.ep[1]] : null,
+    cards: { w: Object.assign({}, s.cards.w), b: Object.assign({}, s.cards.b) },
+    deck: s.deck.slice(),
+    coins: { w: s.coins.w, b: s.coins.b },
+    variant: s.variant,
+    mines: nm,
+    fx: [], kingBlast: [],
+    over: s.over,
+    lastAction: s.lastAction,
+    moveNum: s.moveNum,
+    log: s.log
+  };
+}
+
+/* ---------- aplicar ações (sem a checagem de fim de jogo, que é cara) ---------- */
+function iaFecharTurno(t, me) {
+  if (t.variant !== "treino") t.coins[me] += 5;
+  t.turn = me === "w" ? "b" : "w";
+  if (me === "b") t.moveNum++;
+}
+// devolve o estado filho, ou null se o lance for ilegal
+function iaFilho(s, a) {
+  const me = s.turn;
+  const t = iaClonar(s);
+  t.fx = []; t.kingBlast = [];
+  if (a.m) {
+    execMove(t, a.m, "Q");
+    if (t.kingBlast.indexOf(me) >= 0 || iaXeque(t, me)) return null;
+  } else if (a.kind === "card") {
+    applyCardEffect(t, a.card, a.at);
+    delete t.cards[me][a.card];
+    if (t.variant !== "treino") t.coins[me] -= CARD_COST[a.card];
+    if (t.kingBlast.indexOf(me) >= 0 || iaXeque(t, me)) return null;
+  } else {
+    if (!t.deck.length) return null;
+    t.cards[me][t.deck.shift()] = 1;
+    t.ep = null;
+  }
+  t._bomba = (s._bomba === undefined ? iaTemBombaNoTabuleiro(s) : s._bomba) || (a.kind === "card" && a.card === "bomba");
+  t.lastAction = a.m ? { kind: "move", from: a.m.from, to: a.m.to, promo: "Q" } : a;
+  iaFecharTurno(t, me);
+  return t;
+}
+
+/* ---------- geração de ações ---------- */
+function iaLances(s, soCapturas) {
+  const out = [], b = s.board, me = s.turn;
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = b[r][c];
+    if (!p || p.t === "X" || p.c !== me) continue;
+    const ms = iaPseudo(s, r, c);
+    for (const m of ms) {
+      const alvo = m.ep ? b[r][m.to[1]] : b[m.to[0]][m.to[1]];
+      const captura = !!(m.ep || m.shoot || (alvo && alvo.t && alvo.t !== "X" && alvo.c !== me));
+      if (soCapturas && !captura) continue;
+      let nota = 0;
+      if (captura && alvo) nota = iaValor(alvo) * 10 - (IA_VAL[p.t] || 0);
+      else if (captura) nota = 900;
+      if (m.promo || (p.t === "P" && (m.to[0] === 0 || m.to[0] === 7))) nota += 8000;
+      out.push({ kind: "move", from: m.from, to: m.to, promo: "Q", m: m, nota: nota, cap: captura });
+    }
+  }
+  return out;
+}
+
+function iaCartas(s) {
+  const out = [], me = s.turn;
+  for (const key of CARD_KEYS) {
+    if (!s.cards[me][key] || !canAfford(s, key)) continue;
+    for (const at of cardTargets(s, key)) {
+      out.push({ kind: "card", card: key, at: at, nota: 600 - (CARD_COST[key] || 0) * 2, cap: false });
+    }
+  }
+  if (canDraw(s)) out.push({ kind: "draw", nota: 30, cap: false });
+  return out;
+}
+
+/* ---------- tabela de transposição ---------- */
+let IA_Z = null;
+function iaPrepararZobrist() {
+  let x = 123456789;
+  const rnd = () => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return x >>> 0; };
+  const tab = (n) => { const a = new Array(n); for (let i = 0; i < n; i++) a[i] = [rnd(), rnd()]; return a; };
+  IA_Z = { peca: tab(64 * 16), efeito: tab(64 * 8), mina: tab(128), turno: tab(2), extra: tab(256) };
+}
+const IA_TIPO_IDX = { P: 0, N: 1, B: 2, R: 3, Q: 4, K: 5, X: 6 };
+function iaHash(s) {
+  if (!IA_Z) iaPrepararZobrist();
+  let h1 = 0, h2 = 0;
+  const z = IA_Z, b = s.board;
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    const p = b[r][c];
+    if (!p) continue;
+    const sq = r * 8 + c;
+    const k = z.peca[sq * 16 + (IA_TIPO_IDX[p.t] || 0) * 2 + (p.c === "b" ? 1 : 0)];
+    h1 ^= k[0]; h2 ^= k[1];
+    if (p.st) { let i = 0; for (const t in p.st) if (p.st[t]) { const e = z.efeito[sq * 8 + (IA_TIPO_IDX[t] || 0)]; h1 ^= e[0]; h2 ^= e[1]; i++; } }
+    if (p.sh) { const e = z.efeito[sq * 8 + 6]; h1 ^= e[0]; h2 ^= e[1]; }
+    if (p.bm) { const e = z.efeito[sq * 8 + 7]; h1 ^= e[0]; h2 ^= e[1]; }
+    if (p.ar) { const e = z.extra[sq]; h1 ^= e[0]; h2 ^= e[1]; }
+  }
+  for (const m of s.mines) { const e = z.mina[(m.at[0] * 8 + m.at[1]) + (m.c === "b" ? 64 : 0)]; h1 ^= e[0]; h2 ^= e[1]; }
+  const tz = z.turno[s.turn === "w" ? 0 : 1]; h1 ^= tz[0]; h2 ^= tz[1];
+  let flags = (s.castling.w.k ? 1 : 0) | (s.castling.w.q ? 2 : 0) | (s.castling.b.k ? 4 : 0) | (s.castling.b.q ? 8 : 0);
+  const fz = z.extra[64 + flags]; h1 ^= fz[0]; h2 ^= fz[1];
+  if (s.ep) { const e = z.extra[80 + s.ep[1]]; h1 ^= e[0]; h2 ^= e[1]; }
+  let i = 0;
+  for (const k of CARD_KEYS) {
+    if (s.cards.w[k]) { const e = z.extra[96 + i]; h1 ^= e[0]; h2 ^= e[1]; }
+    if (s.cards.b[k]) { const e = z.extra[130 + i]; h1 ^= e[0]; h2 ^= e[1]; }
+    i++;
+  }
+  const cw = z.extra[170 + (Math.min(s.coins.w, 200) >> 3)]; h1 ^= cw[0]; h2 ^= cw[1];
+  const cb = z.extra[200 + (Math.min(s.coins.b, 200) >> 3)]; h1 ^= cb[0]; h2 ^= cb[1];
+  return (h1 >>> 0) * 65536 + (h2 >>> 16);
+}
+
+/* ---------- busca ---------- */
+let iaTT = new Map(), iaMata = [], iaHist = null, iaNos = 0, iaPrazo = 0, iaPlyCartas = 2;
+
+function iaOrdenar(lista, acaoTT, ply) {
+  const k = iaMata[ply];
+  for (const a of lista) {
+    let n = a.nota;
+    if (acaoTT && iaMesma(a, acaoTT)) n += 1000000;
+    else if (!a.cap && k) {
+      if (k[0] && iaMesma(a, k[0])) n += 9000;
+      else if (k[1] && iaMesma(a, k[1])) n += 8000;
+    }
+    if (!a.cap && a.kind === "move") n += iaHist[a.from[0] * 8 + a.from[1]][a.to[0] * 8 + a.to[1]] || 0;
+    a.ord = n;
+  }
+  lista.sort((x, y) => y.ord - x.ord);
+}
+function iaMesma(a, b) {
+  if (!a || !b || a.kind !== b.kind) return false;
+  if (a.kind === "move") return a.from[0] === b.from[0] && a.from[1] === b.from[1] && a.to[0] === b.to[0] && a.to[1] === b.to[1];
+  if (a.kind === "card") return a.card === b.card && a.at[0] === b.at[0] && a.at[1] === b.at[1];
+  return true;
+}
+function iaLimpar(a) {
+  if (!a) return null;
+  if (a.kind === "move") return { kind: "move", from: [a.from[0], a.from[1]], to: [a.to[0], a.to[1]], promo: "Q" };
+  if (a.kind === "card") return { kind: "card", card: a.card, at: [a.at[0], a.at[1]] };
+  return { kind: "draw" };
+}
+
+function iaRelogio() {
+  if ((++iaNos & 511) === 0 && Date.now() > iaPrazo) throw IA_TEMPO;
+}
+
+function iaQuiesc(s, alfa, beta, ply, qply) {
+  iaRelogio();
+  const xeque = iaXeque(s, s.turn);
+  let melhor = -IA_MATE;
+  if (!xeque) {
+    // avaliação preguiçosa: a conta barata já resolve quando a posição é desequilibrada
+    const barata = iaAvaliarRapido(s, s.turn);
+    if (barata - IA_MARGEM >= beta) return barata - IA_MARGEM;
+    melhor = (barata + IA_MARGEM <= alfa) ? barata + IA_MARGEM : iaAvaliar(s, s.turn);
+    if (melhor >= beta) return melhor;
+    if (melhor > alfa) alfa = melhor;
+    if (qply >= 8) return melhor;
+  } else if (qply >= 10) {
+    return iaAvaliar(s, s.turn);
+  }
+  const lista = iaLances(s, !xeque);
+  lista.sort((x, y) => y.nota - x.nota);
+  let houve = false;
+  for (const a of lista) {
+    const t = iaFilho(s, a);
+    if (!t) continue;
+    houve = true;
+    const v = -iaQuiesc(t, -beta, -alfa, ply + 1, qply + 1);
+    if (v > melhor) melhor = v;
+    if (melhor > alfa) alfa = melhor;
+    if (alfa >= beta) break;
+  }
+  if (xeque && !houve) {
+    // sem lance de tabuleiro: pode ser mate, mas cartas podem salvar
+    if (!iaTemSaida(s)) return -IA_MATE + ply;
+    return iaAvaliar(s, s.turn);
+  }
+  return melhor;
+}
+
+// existe alguma carta ou compra que ainda dê jogo?
+function iaTemSaida(s) {
+  if (canDraw(s)) return true;
+  const me = s.turn;
+  for (const key of CARD_KEYS) {
+    if (!s.cards[me][key] || !canAfford(s, key)) continue;
+    if (cardTargets(s, key).length) return true;
+  }
+  return false;
+}
+
+function iaNegamax(s, prof, alfa, beta, ply, podeNulo) {
+  iaRelogio();
+  const alfa0 = alfa;
+  const xeque = iaXeque(s, s.turn);
+  if (xeque && ply < 24) prof++;                       // extensão de xeque
+  if (prof <= 0) return iaQuiesc(s, alfa, beta, ply, 0);
+
+  // nos onde as cartas entram na busca o conjunto de jogadas e outro:
+  // precisam de uma entrada separada na tabela de transposicao
+  const chave = ply < iaPlyCartas ? -iaHash(s) - 1 : iaHash(s);
+  const ent = iaTT.get(chave);
+  let acaoTT = null;
+  if (ent) {
+    acaoTT = ent.a;
+    if (ent.prof >= prof) {
+      let v = ent.v;
+      if (v > IA_MATE - 1000) v -= ply; else if (v < -IA_MATE + 1000) v += ply;
+      if (ent.flag === 0) return v;
+      if (ent.flag === 1) { if (v > alfa) alfa = v; }
+      else if (v < beta) beta = v;
+      if (alfa >= beta) return v;
+    }
+  }
+
+  // poda do lance nulo
+  if (podeNulo && !xeque && prof >= 3 && ply > 0) {
+    const t = iaClonar(s);
+    t.turn = s.turn === "w" ? "b" : "w";
+    t.ep = null;
+    const v = -iaNegamax(t, prof - 3, -beta, -beta + 1, ply + 1, false);
+    if (v >= beta) return beta;
+  }
+
+  let lista = iaLances(s, false);
+  if (ply < iaPlyCartas) lista = lista.concat(iaCartas(s));
+  iaOrdenar(lista, acaoTT, ply);
+
+  let melhor = -IA_MATE - 1, melhorAcao = null, n = 0;
+  for (const a of lista) {
+    const t = iaFilho(s, a);
+    if (!t) continue;
+    n++;
+    let v;
+    if (n === 1) {
+      v = -iaNegamax(t, prof - 1, -beta, -alfa, ply + 1, true);
+    } else {
+      // redução dos lances tardios e janela estreita
+      let red = 0;
+      if (prof >= 3 && n > 3 && !a.cap && !xeque) red = n > 8 ? 2 : 1;
+      v = -iaNegamax(t, prof - 1 - red, -alfa - 1, -alfa, ply + 1, true);
+      if (v > alfa && (red || v < beta)) v = -iaNegamax(t, prof - 1, -beta, -alfa, ply + 1, true);
+    }
+    if (v > melhor) { melhor = v; melhorAcao = a; }
+    if (melhor > alfa) alfa = melhor;
+    if (alfa >= beta) {
+      if (!a.cap && a.kind === "move") {
+        const k = iaMata[ply] || (iaMata[ply] = [null, null]);
+        if (!iaMesma(k[0], a)) { k[1] = k[0]; k[0] = iaLimpar(a); }
+        iaHist[a.from[0] * 8 + a.from[1]][a.to[0] * 8 + a.to[1]] += prof * prof;
+      }
+      break;
+    }
+  }
+
+  if (!n) {
+    // nenhum lance de tabuleiro: ainda pode haver carta/compra (se não foram geradas)
+    if (ply >= iaPlyCartas) {
+      const extras = iaCartas(s);
+      for (const a of extras) {
+        const t = iaFilho(s, a);
+        if (!t) continue;
+        n++;
+        const v = -iaNegamax(t, prof - 1, -beta, -alfa, ply + 1, true);
+        if (v > melhor) { melhor = v; melhorAcao = a; }
+        if (melhor > alfa) alfa = melhor;
+        if (alfa >= beta) break;
+      }
+    }
+    if (!n) return xeque ? -IA_MATE + ply : 0;
+  }
+
+  let guardar = melhor;
+  if (guardar > IA_MATE - 1000) guardar += ply; else if (guardar < -IA_MATE + 1000) guardar -= ply;
+  iaTT.set(chave, {
+    prof: prof, v: guardar, a: iaLimpar(melhorAcao),
+    flag: melhor <= alfa0 ? 2 : (melhor >= beta ? 1 : 0)
+  });
+  if (iaTT.size > 600000) iaTT.clear();
+  return melhor;
+}
+
+/* ---------- raiz ---------- */
+function iaBuscar(raiz, prazoMs, profMax, plyCartas) {
+  const s = iaClonar(raiz);   // nunca mexe (nem anota nada) no estado da partida de verdade
+  iaPrazo = Date.now() + prazoMs;
+  iaPlyCartas = plyCartas == null ? 2 : plyCartas;
+  iaNos = 0;
+  iaMata = [];
+  iaHist = [];
+  for (let i = 0; i < 64; i++) { iaHist[i] = new Array(64).fill(0); }
+  if (iaTT.size > 300000) iaTT.clear();
+
+  let lista = iaLances(s, false).concat(iaCartas(s));
+  if (!lista.length) return { acao: null, prof: 0, nos: 0 };
+
+  let melhorAcao = null, melhorV = 0, profFeita = 0;
+  for (let prof = 1; prof <= profMax; prof++) {
+    let alfa = -IA_MATE - 1, beta = IA_MATE + 1;
+    if (prof >= 5 && melhorAcao) { alfa = melhorV - 60; beta = melhorV + 60; }
+    let achou = null, achouV = -IA_MATE - 1, refez = false;
+    try {
+      while (true) {
+        iaOrdenar(lista, melhorAcao, 0);
+        achou = null; achouV = -IA_MATE - 1;
+        let a1 = alfa, n = 0;
+        for (const a of lista) {
+          const t = iaFilho(s, a);
+          if (!t) continue;
+          n++;
+          let v = -iaNegamax(t, prof - 1, -beta, -a1, 1, true);
+          if (v > achouV) { achouV = v; achou = a; }
+          if (v > a1) a1 = v;
+        }
+        if (!n) return { acao: null, prof: prof, nos: iaNos };
+        if (achouV <= alfa || achouV >= beta) {       // janela estourou: refaz aberta
+          if (refez) break;
+          refez = true; alfa = -IA_MATE - 1; beta = IA_MATE + 1;
+          continue;
+        }
+        break;
+      }
+    } catch (e) {
+      if (e !== IA_TEMPO) throw e;
+      break;
+    }
+    if (achou) { melhorAcao = iaLimpar(achou); melhorV = achouV; profFeita = prof; }
+    if (melhorV > IA_MATE - 1000) break;              // mate encontrado
+    if (Date.now() > iaPrazo) break;
+  }
+  if (!melhorAcao) melhorAcao = iaLimpar(lista[0]);
+  return { acao: melhorAcao, prof: profFeita, nos: iaNos, v: melhorV };
+}
+
+/* ---------- níveis ---------- */
+const IA_NIVEL = {
+  5: { prazo: 4000,  prof: 30, cartas: 2 },
+  6: { prazo: 10000, prof: 40, cartas: 3 }
+};
+function escolherAcaoIA(s, nivel) {
+  const cfg = IA_NIVEL[nivel] || IA_NIVEL[5];
+  return iaBuscar(s, cfg.prazo, cfg.prof, cfg.cartas).acao;
+}
+
+/* ---------- geração de lances rápida (igualzinha à do motor, só que sem desperdício) ---------- */
+// Peças com estilo extra ou bispo atirador continuam indo pela função do motor.
+function iaPseudo(s, r, c) {
+  const b = s.board, p = b[r][c];
+  if (!p || p.t === "X") return [];
+  if (p.st || p.sh) return pseudoMoves(s, r, c);
+  const out = [], meu = p.c, temMina = s.mines.length > 0;
+
+  if (p.t === "P") {
+    const dir = meu === "w" ? -1 : 1, inicio = meu === "w" ? 6 : 1, ultima = meu === "w" ? 0 : 7;
+    const r1 = r + dir;
+    if (r1 >= 0 && r1 <= 7) {
+      if (!b[r1][c]) {
+        out.push({ from: [r, c], to: [r1, c], promo: r1 === ultima ? true : undefined });
+        if (r === inicio && !b[r + 2 * dir][c] && (!temMina || mineIdx(s, r1, c) < 0)) {
+          out.push({ from: [r, c], to: [r + 2 * dir, c], double: true });
+        }
+      }
+      for (let i = 0; i < 2; i++) {
+        const tc = c + (i ? 1 : -1);
+        if (tc < 0 || tc > 7) continue;
+        const q = b[r1][tc];
+        if (q && q.t !== "X" && q.c !== meu && q.t !== "K") out.push({ from: [r, c], to: [r1, tc], promo: r1 === ultima ? true : undefined });
+        else if (!q && s.ep && s.ep[0] === r1 && s.ep[1] === tc) out.push({ from: [r, c], to: [r1, tc], ep: true });
+      }
+    }
+    return out;
+  }
+
+  if (p.t === "N" || p.t === "K") {
+    const ds = p.t === "N" ? IA_SALTOS : IA_DIRS;
+    for (let i = 0; i < 8; i++) {
+      const tr = r + ds[i][0], tc = c + ds[i][1];
+      if (tr < 0 || tr > 7 || tc < 0 || tc > 7) continue;
+      const q = b[tr][tc];
+      if (q && (q.t === "X" || q.c === meu || q.t === "K")) continue;
+      if (p.t === "K" && q && q.ar) continue;            // o rei não encara a armadura
+      out.push({ from: [r, c], to: [tr, tc] });
+    }
+    if (p.t === "K") {
+      const dir = s.castling[meu], linha = meu === "w" ? 7 : 0;
+      if (r === linha && c === 4 && (dir.k || dir.q) && !iaXeque(s, meu)) {
+        const opp = meu === "w" ? "b" : "w";
+        if (dir.k) {
+          const rk = b[linha][7];
+          if (rk && rk.t === "R" && rk.c === meu && !b[linha][5] && !b[linha][6] &&
+              !attacksSquare(s, opp, linha, 5) && !attacksSquare(s, opp, linha, 6)) out.push({ from: [r, c], to: [linha, 6], castle: "k" });
+        }
+        if (dir.q) {
+          const rk = b[linha][0];
+          if (rk && rk.t === "R" && rk.c === meu && !b[linha][1] && !b[linha][2] && !b[linha][3] &&
+              !attacksSquare(s, opp, linha, 2) && !attacksSquare(s, opp, linha, 3)) out.push({ from: [r, c], to: [linha, 2], castle: "q" });
+        }
+      }
+    }
+    return out;
+  }
+
+  const ini = p.t === "B" ? 0 : p.t === "R" ? 4 : 0;
+  const fim = p.t === "B" ? 4 : 8;
+  for (let i = ini; i < fim; i++) {
+    const d = IA_DIRS[i];
+    let tr = r + d[0], tc = c + d[1];
+    while (tr >= 0 && tr <= 7 && tc >= 0 && tc <= 7) {
+      const q = b[tr][tc];
+      if (!q) {
+        out.push({ from: [r, c], to: [tr, tc] });
+        if (temMina && mineIdx(s, tr, tc) >= 0) break;   // pode parar na mina, não atravessá-la
+        tr += d[0]; tc += d[1];
+        continue;
+      }
+      if (q.t !== "X" && q.c !== meu && q.t !== "K") out.push({ from: [r, c], to: [tr, tc] });
+      break;
+    }
+  }
+  return out;
+}
+
+function iaLimparTT() { iaTT = new Map(); }
+
+/* ---------- porta de entrada ---------- */
+function escolherAcaoBot(s, nivel) {
+  if (nivel <= 3) return escolherJogadaBot(s, nivel);
+  if (nivel === 4) return buscaProfunda(s, 6);   // a busca anterior, no ajuste mais forte dela
+  return escolherAcaoIA(s, nivel);
+}
+</script>
 <script>
 /* ============================================================
    chesstable — Interface + Multiplayer
@@ -1388,190 +2375,6 @@ function drawAnswer(aceita) {
   }
 }
 
-/* ---------- bot (jogar contra o computador) ---------- */
-const VAL_PECA = { P: 100, N: 300, B: 320, R: 500, Q: 900, K: 0 };
-
-function valorPeca(p) {
-  let v = VAL_PECA[p.t] || 0;
-  if (p.st) for (const t in p.st) if (p.st[t] && t !== p.t) v += Math.round((VAL_PECA[t] || 0) * 0.45);
-  if (p.sn) v += 120;          // bispo atirador
-  if (p.bm) v += 90;           // torre bomba
-  if (p.ar) v += 110;          // armadura
-  return v;
-}
-
-// quanto a posição vale para 'col' (positivo = melhor para col)
-function avaliar(s, col) {
-  if (s.over) {
-    if (s.over.result === "draw" || s.over.result === "stalemate") return 0;
-    return s.over.winner === col ? 100000 : -100000;
-  }
-  let v = 0;
-  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
-    const p = s.board[r][c];
-    if (!p || !p.t || p.t === "X") continue;
-    v += (p.c === col ? 1 : -1) * valorPeca(p);
-  }
-  if (s.variant !== "treino") v += (s.coins[col] - s.coins[enemy(col)]) * 0.8;
-  if (inCheck(s, enemy(col))) v += 35;
-  if (inCheck(s, col)) v -= 45;
-  return v;
-}
-
-// todas as ações possíveis de quem está na vez
-function acoesDoBot(s, incluirCartas) {
-  const out = [];
-  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
-    const p = s.board[r][c];
-    if (!p || !p.t || p.c !== s.turn) continue;
-    for (const m of legalMovesFor(s, r, c)) {
-      out.push({ kind: "move", from: [r, c], to: [m.to[0], m.to[1]], promo: "Q" });
-    }
-  }
-  if (incluirCartas) {
-    for (const key of CARD_KEYS) {
-      if (!s.cards[s.turn][key] || !canAfford(s, key)) continue;
-      for (const at of cardTargets(s, key)) out.push({ kind: "card", card: key, at: at });
-    }
-    if (canDraw(s)) out.push({ kind: "draw" });
-  }
-  return out;
-}
-
-function simular(s, a) {
-  const t = cloneState(s);
-  t.log = [];          // cloneState compartilha o log: a simulação precisa do seu próprio
-  const r = applyAction(t, a);
-  return r.ok ? t : null;
-}
-
-function escolherJogadaBot(s, nivel) {
-  const col = s.turn;
-  const acoes = acoesDoBot(s, true);
-  if (!acoes.length) return null;
-
-  // nível 1: quase aleatório, mas costuma aproveitar capturas simples
-  if (nivel === 1) {
-    if (Math.random() < 0.65) {
-      const capturas = acoes.filter(a => a.kind === "move" && s.board[a.to[0]][a.to[1]] && s.board[a.to[0]][a.to[1]].t);
-      if (capturas.length) return capturas[Math.floor(Math.random() * capturas.length)];
-    }
-    return acoes[Math.floor(Math.random() * acoes.length)];
-  }
-
-  // pontua cada ação pelo resultado imediato
-  const pontuadas = [];
-  for (const a of acoes) {
-    const t = simular(s, a);
-    if (!t) continue;
-    pontuadas.push({ a: a, t: t, v: avaliar(t, col) });
-  }
-  if (!pontuadas.length) return acoes[0];
-  pontuadas.sort((x, y) => y.v - x.v);
-
-  if (nivel === 2) {
-    // melhor jogada imediata, com desempate aleatório entre as quase iguais
-    const topo = pontuadas.filter(p => p.v >= pontuadas[0].v - 8);
-    return topo[Math.floor(Math.random() * topo.length)].a;
-  }
-
-  // nível 3: olha também a melhor resposta do adversário (2 lances)
-  const candidatos = pontuadas.slice(0, 14);
-  let melhor = candidatos[0], melhorV = -Infinity;
-  for (const cand of candidatos) {
-    if (cand.t.over) {
-      const v = avaliar(cand.t, col);
-      if (v > melhorV) { melhorV = v; melhor = cand; }
-      continue;
-    }
-    const respostas = acoesDoBot(cand.t, true).slice(0, 40);
-    let pior = Infinity;
-    for (const rp of respostas) {
-      const t2 = simular(cand.t, rp);
-      if (!t2) continue;
-      const v = avaliar(t2, col);
-      if (v < pior) pior = v;
-      if (pior <= melhorV - 400) break;   // já é ruim demais
-    }
-    if (pior === Infinity) pior = cand.v;
-    if (pior > melhorV) { melhorV = pior; melhor = cand; }
-  }
-  return melhor.a;
-}
-
-/* ---------- busca profunda (níveis 4, 5 e 6) ---------- */
-const PRAZO = { 4: 350, 5: 1100, 6: 2400 };     // tempo de pensamento, em ms
-const LARGURA = { 1: 10, 2: 14, 3: 18 };        // quantas ações olhar por profundidade
-const TEMPO_ESGOTADO = { tempo: true };
-
-// nota rápida para ordenar as ações (ordem boa = poda melhor)
-function notaRapida(s, a) {
-  if (a.kind === "move") {
-    const alvo = s.board[a.to[0]][a.to[1]];
-    let n = 0;
-    if (alvo && alvo.t && alvo.t !== "X") n += valorPeca(alvo) + 50;
-    const p = s.board[a.from[0]][a.from[1]];
-    if (p && p.t === "P" && (a.to[0] === 0 || a.to[0] === 7)) n += 700;   // promoção
-    return n;
-  }
-  if (a.kind === "card") return 40 - (CARD_COST[a.card] || 0) * 0.3;
-  return 5;   // comprar do monte
-}
-
-function ordenarAcoes(s, acoes, largura) {
-  const lista = acoes.map(a => ({ a: a, n: notaRapida(s, a) }));
-  lista.sort((x, y) => y.n - x.n);
-  return lista.slice(0, largura).map(x => x.a);
-}
-
-function negamax(s, prof, alfa, beta, prazo) {
-  if (Date.now() > prazo) throw TEMPO_ESGOTADO;
-  if (s.over || prof <= 0) return avaliar(s, s.turn);
-  const todas = acoesDoBot(s, true);
-  if (!todas.length) return avaliar(s, s.turn);
-  const acoes = ordenarAcoes(s, todas, LARGURA[Math.min(prof, 3)] || 10);
-  let melhor = -Infinity;
-  for (const a of acoes) {
-    const t = simular(s, a);
-    if (!t) continue;
-    const v = -negamax(t, prof - 1, -beta, -alfa, prazo);
-    if (v > melhor) melhor = v;
-    if (melhor > alfa) alfa = melhor;
-    if (alfa >= beta) break;          // poda
-  }
-  return melhor === -Infinity ? avaliar(s, s.turn) : melhor;
-}
-
-// aprofundamento progressivo: vai fundo enquanto houver tempo
-function buscaProfunda(s, nivel) {
-  const prazo = Date.now() + (PRAZO[nivel] || 800);
-  const profMax = nivel === 4 ? 3 : nivel === 5 ? 5 : 7;
-  const todas = acoesDoBot(s, true);
-  if (!todas.length) return null;
-  let melhorAcao = ordenarAcoes(s, todas, 1)[0];
-
-  for (let prof = 2; prof <= profMax; prof++) {
-    let alfa = -Infinity, achouNesta = null;
-    const acoes = ordenarAcoes(s, todas, LARGURA[3] + 6);
-    // a melhor da rodada anterior é testada primeiro
-    acoes.sort((x, y) => (y === melhorAcao ? 1 : 0) - (x === melhorAcao ? 1 : 0));
-    try {
-      for (const a of acoes) {
-        const t = simular(s, a);
-        if (!t) continue;
-        const v = -negamax(t, prof - 1, -Infinity, -alfa, prazo);
-        if (v > alfa) { alfa = v; achouNesta = a; }
-      }
-    } catch (e) {
-      if (e !== TEMPO_ESGOTADO) throw e;
-      break;                       // acabou o tempo: fica com o resultado da profundidade anterior
-    }
-    if (achouNesta) melhorAcao = achouNesta;
-    if (alfa > 50000) break;       // achou mate
-  }
-  return melhorAcao;
-}
-
 let botNivel = 0;        // 0 = sem bot; 1 a 6
 let botPensando = false;
 const BOT_COR = "b";     // o computador joga de pretas
@@ -1593,25 +2396,77 @@ function vezDoBot() {
 function jogarBot() {
   if (!vezDoBot() || botPensando) return;
   botPensando = true;
-  const nivel = botNivel;
-  const espera = nivel >= 5 ? 60 : 420;   // níveis fortes já demoram pensando
-  if (nivel >= 5) {
+  const nivel = botNivel, alvo = state, t0 = Date.now();
+  if (nivel >= 4) {
     const st = $("status");
     if (st) st.textContent = "O computador está pensando…";
   }
-  setTimeout(() => {
+  pensarBot(alvo, nivel).then((a) => {
+    const atraso = Math.max(0, 420 - (Date.now() - t0));   // pausa mínima para não parecer instantâneo
+    setTimeout(() => {
+      try {
+        if (!vezDoBot() || state !== alvo || !a) return;
+        const res = applyAction(state, a);
+        if (!res.ok) return;
+        clearSelection();
+        render();
+      } finally {
+        botPensando = false;
+      }
+    }, atraso);
+  }, () => { botPensando = false; render(); });
+}
+
+/* ---------- o computador pensa num Web Worker (sem travar a página) ---------- */
+let iaWorker, iaSeq = 0;
+const iaPend = {};
+function criarWorker() {
+  try {
+    const motor = document.getElementById("motor"), cerebro = document.getElementById("motorIA");
+    if (!motor || !cerebro || typeof Worker === "undefined") return false;
+    const fonte = motor.textContent + "\n" + cerebro.textContent + "\n" +
+      "self.onmessage = function(e) {\n" +
+      "  var d = e.data;\n" +
+      "  try { self.postMessage({ id: d.id, acao: escolherAcaoBot(d.s, d.nivel) }); }\n" +
+      "  catch (err) { self.postMessage({ id: d.id, erro: String((err && err.message) || err) }); }\n" +
+      "};";
+    const w = new Worker(URL.createObjectURL(new Blob([fonte], { type: "text/javascript" })));
+    w.onmessage = (e) => {
+      const f = iaPend[e.data.id];
+      if (f) { delete iaPend[e.data.id]; f(e.data); }
+    };
+    w.onerror = () => { iaWorker = false; };
+    return w;
+  } catch (e) {
+    return false;
+  }
+}
+function pensarBot(s, nivel) {
+  return new Promise((resolve) => {
+    if (iaWorker === undefined) iaWorker = criarWorker();
+    if (!iaWorker) { resolve(escolherAcaoBot(s, nivel)); return; }   // sem worker: pensa na própria página
+    const id = ++iaSeq;
+    let pronto = false;
+    iaPend[id] = (msg) => {
+      if (pronto) return;
+      pronto = true;
+      if (msg.erro) { iaWorker = false; resolve(escolherAcaoBot(s, nivel)); }
+      else resolve(msg.acao);
+    };
     try {
-      if (!vezDoBot()) return;
-      const a = nivel >= 4 ? buscaProfunda(state, nivel) : escolherJogadaBot(state, nivel);
-      if (!a) return;
-      const res = applyAction(state, a);
-      if (!res.ok) return;
-      clearSelection();
-      render();
-    } finally {
-      botPensando = false;
+      iaWorker.postMessage({ id: id, s: s, nivel: nivel });
+    } catch (e) {
+      delete iaPend[id]; iaWorker = false; resolve(escolherAcaoBot(s, nivel)); return;
     }
-  }, espera);
+    setTimeout(() => {        // rede de segurança: se o worker travar, joga rápido e volta ao modo simples
+      if (pronto) return;
+      pronto = true;
+      delete iaPend[id];
+      try { iaWorker.terminate(); } catch (e) {}
+      iaWorker = false;
+      resolve(escolherJogadaBot(s, 3));
+    }, 40000);
+  });
 }
 
 /* ---------- helpers ---------- */
