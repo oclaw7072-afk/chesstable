@@ -40,6 +40,10 @@ body{
   color:var(--ink); min-height:100vh; display:flex; flex-direction:column; align-items:center;
 }
 header{padding:18px 12px 6px; text-align:center}
+#btnIdioma{position:fixed; top:14px; right:16px; z-index:40; background:var(--panel); color:var(--ink);
+  border:1px solid #55498a; border-radius:9px; padding:6px 13px; font-weight:800; font-size:13px;
+  letter-spacing:1px; cursor:pointer}
+#btnIdioma:hover{border-color:var(--accent); color:var(--accent)}
 header h1{font-size:clamp(22px,3.4vw,34px); letter-spacing:.5px; font-weight:800}
 header h1 .gold{color:var(--accent)}
 header p{color:var(--muted); font-size:13px; margin-top:2px}
@@ -254,6 +258,7 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
 </svg>
 <div id="ghost" hidden></div>
 <header>
+  <button id="btnIdioma" title="Switch to English">EN</button>
   <h1>♞ <span class="gold">chesstable</span></h1>
   <p>Xadrez clássico + cartas especiais, moedas e explosões</p>
 </header>
@@ -324,7 +329,7 @@ header p{color:var(--muted); font-size:13px; margin-top:2px}
   </div>
   <div class="menucard">
     <h2>As 17 cartas</h2>
-    <div class="rules">
+    <div class="rules" id="regras">
       <b>♞♝♜♛ Estilos (Cavalo, Bispo, Torre, Dama)</b> — a peça escolhida ganha para sempre aquele movimento além do próprio (marcada com um selo na casa). Não valem para o rei.<br><br>
       <b>✨ Invocar (Cavalo, Bispo, Torre, Dama)</b> — cria a peça numa casa vazia da sua primeira fileira.<br><br>
       <b>🪨 Pedra Ancestral</b> — pedra permanente numa casa vazia; ninguém ocupa nem atravessa.<br>
@@ -2591,6 +2596,292 @@ function somDoLance(idx) {
   if (boom) setTimeout(() => tocar("explosao"), 90);
 }
 
+// o bloco de regras é trocado inteiro: fica melhor do que traduzir pedaço por pedaço
+const REGRAS_EN = '' +
+  '<b>♞♝♜♛ Styles (Knight, Bishop, Rook, Queen)</b> — the chosen piece keeps that move forever, on top of its own (a badge marks the square). Not for the king.<br><br>' +
+  '<b>✨ Summon (Knight, Bishop, Rook, Queen)</b> — creates the piece on an empty square of your back rank.<br><br>' +
+  '<b>🪨 Ancient Rock</b> — a permanent rock on an empty square; nobody stands on it or moves through it.<br>' +
+  '<b>🏹 Long-Range Strike</b> — captures an enemy piece your pieces already attack, without moving anyone.<br>' +
+  '<b>🔄 Change of Sides</b> — an enemy piece you attack switches sides (not the king).<br>' +
+  '<b>💀 Sacrifice</b> — removes one of your own pieces (not the king).<br>' +
+  '<b>🎯 Sharpshooter Bishop</b> — one of your bishops starts capturing without leaving its square.<br>' +
+  '<b>💣 Bomb Rook</b> — when that rook captures — or <b>is captured</b> — it blows up itself and every neighbouring square, and the blast <b>can kill kings</b>: nobody may set off a bomb with their own king in range (capturing the bomb with your king next to it does not save you from check!). If it can capture something next to the enemy king, that is <b>check</b>.<br>' +
+  '<b>🛟 King’s Insurance</b> — teleports your king to any empty square.<br>' +
+  '<b>💥 Land Mine</b> — a visible mine on an empty square: whoever stops on it blows up along with its neighbours, and it <b>can kill kings</b>! Pieces <b>cannot move through</b> the mine, nobody may set one off with <b>their own king in range</b> (the king cannot step on it either), and a king within reach of a mine the enemy can set off is in <b>check</b>.<br>' +
+  '<b>🛡️ Thorn Armor</b> — the piece cannot be captured: whoever tries dies and the armor breaks (Long-Range Strike and Sharpshooter Bishop only break the armor). Careful: a <b>bomb rook killed on the thorns still explodes</b>! Not for the king.<br><br>' +
+  '<b>🪙 Coins</b> — every card has a price (baseline: Summon Knight = 27). You start with <b>0 coins</b> and earn <b>+5 every move</b>. With no coins the card cannot be played — not even to escape check!<br>' +
+  '<b>🎴 Hand and deck</b> — each player gets <b>3 random cards</b> (never the same card twice between the two) and the remaining 11 form the <b>deck</b>. On your turn: <b>move</b>, <b>play a card</b> or <b>draw 1 from the deck</b> (free, only with fewer than <b>3 cards</b> in hand and not in check). Your opponent’s hand stays <b>face down</b>.<br>' +
+  '<b>⏰ Ranked games</b> — pick <b>1, 3 or 10 minutes</b>; you only face players on the same time control, and running out of time is a <b>loss</b>.<br><br>' +
+  'Each piece can carry <b>at most ONE effect</b>. Kings and rocks survive explosions (but mines and bombs <b>can kill kings</b> — see above). A promoted pawn <b>chooses</b> its piece — only when it reaches the <b>opponent’s eighth rank</b>; a pawn with a style that goes back to its own first rank does <b>not</b> promote. It is only checkmate if the cards cannot save the king either!';
+
+/* ---------- idiomas: português (padrão) e inglês ---------- */
+let idioma = "pt";
+try { if (localStorage.getItem("ct_idioma") === "en") idioma = "en"; } catch (e) {}
+
+// frases exatas: a chave é o texto em português, igualzinho ao que aparece na tela
+const EN = {
+  // menu e conta
+  "Xadrez clássico + cartas especiais, moedas e explosões": "Classic chess + special cards, coins and explosions",
+  "♞ Sua conta": "♞ Your account",
+  "🔎 Buscar partida (rankeada)": "🔎 Find a match (ranked)",
+  "Escolha o formato de tempo da partida:": "Pick the time control:",
+  "bullet": "bullet", "blitz": "blitz", "rápida": "rapid",
+  "Sair da conta": "Sign out",
+  "Entre com sua Conta do Google para jogar partidas rankeadas.": "Sign in with your Google Account to play ranked games.",
+  "Escolha seu nome no jogo (3–16, letras, números ou _):": "Choose your in-game name (3–16 letters, numbers or _):",
+  "Confirmar nome": "Confirm name",
+  "Jogar": "Play",
+  "🌐 Criar sala online": "🌐 Create an online room",
+  "🔑 Entrar com código": "🔑 Join with a code",
+  "🤖 Jogar contra o computador": "🤖 Play against the computer",
+  "Escolha o nível do computador:": "Choose the computer's level:",
+  "Nível 1": "Level 1", "Nível 2": "Level 2", "Nível 3": "Level 3",
+  "Nível 4": "Level 4", "Nível 5": "Level 5", "Nível 6": "Level 6",
+  "iniciante": "beginner", "intermediário": "intermediate", "difícil": "hard",
+  "muito forte": "very strong", "mestre — pensa 4s": "master — thinks 4s", "máximo — pensa 10s": "maximum — thinks 10s",
+  "💻 Dois jogadores no mesmo PC": "💻 Two players on the same PC",
+  "🎓 Modo treino — todas as cartas, moedas infinitas": "🎓 Training mode — every card, unlimited coins",
+  "Envie este código para o seu oponente:": "Send this code to your opponent:",
+  "Copiar código": "Copy code",
+  "Digite o código que o seu oponente criou:": "Type the code your opponent created:",
+  "Conectar": "Connect",
+  "As 17 cartas": "The 17 cards",
+  "seu nome no jogo": "your in-game name",
+  // partida
+  "🏳️ Desistir": "🏳️ Resign",
+  "🤝 Propor empate": "🤝 Offer a draw",
+  "↺ Nova partida": "↺ New game",
+  "🔊 Som": "🔊 Sound", "🔇 Som": "🔇 Sound",
+  "Menu": "Menu",
+  "Monte": "Deck",
+  "Tabela de lances": "Move list",
+  "Monte de cartas — clique para comprar (grátis, gasta o turno)": "Card deck — click to draw (free, uses your turn)",
+  "🤝 O oponente propõe empate": "🤝 Your opponent offers a draw",
+  "Aceitar": "Accept", "Recusar": "Decline",
+  "Promoção!": "Promotion!",
+  "Escolha a peça do seu peão:": "Choose your pawn's new piece:",
+  "Jogar de novo": "Play again", "Ver tabuleiro": "View the board",
+  "Carta do outro jogador (virada)": "The other player's card (face down)",
+  "Carta secreta do oponente": "Opponent's hidden card",
+  "Espaço vazio": "Empty slot",
+  // avisos
+  "Código copiado!": "Code copied!",
+  "Digite o código da sala.": "Type the room code.",
+  "Jogada rejeitada pelo servidor — tabuleiro sincronizado.": "Move rejected by the server — board resynced.",
+  "No modo treino você já tem todas as cartas.": "In training mode you already have every card.",
+  "O computador não aceita empate — jogue até o fim ou desista.": "The computer doesn't accept draws — play it out or resign.",
+  "O monte acabou.": "The deck is empty.",
+  "O oponente aceitou o empate.": "Your opponent accepted the draw.",
+  "O oponente desistiu da partida.": "Your opponent resigned.",
+  "O oponente iniciou uma nova partida.": "Your opponent started a new game.",
+  "O oponente recusou o empate.": "Your opponent declined the draw.",
+  "Oponente conectado! Você joga de Brancas.": "Opponent connected! You play White.",
+  "Partida rankeada não pode ser reiniciada — use Desistir.": "A ranked game can't be restarted — use Resign.",
+  "Proposta de empate enviada — aguardando o oponente.": "Draw offer sent — waiting for your opponent.",
+  "Sem conexão com o oponente.": "No connection to your opponent.",
+  "Xeque!": "Check!",
+  "⚠️ O oponente desconectou.": "⚠️ Your opponent disconnected.",
+  "Sala não encontrada. Confira o código.": "Room not found. Check the code.",
+  "Não foi possível conectar.": "Couldn't connect.",
+  "Erro na conexão.": "Connection error.",
+  "Biblioteca de rede não carregou. Verifique sua internet.": "The network library didn't load. Check your internet.",
+  "Conectado! Aguardando início…": "Connected! Waiting for the game to start…",
+  "Nenhum alvo válido para esta carta agora.": "No valid target for this card right now.",
+  "Nenhum alvo válido — a ação precisa livrar o rei do xeque.": "No valid target — the move must get your king out of check.",
+  "O computador está pensando…": "The computer is thinking…",
+  "Criando sua conta…": "Creating your account…",
+  "Primeiro acesso: escolha seu nome no jogo.": "First time here: choose your in-game name.",
+  "⚠️ Erro de conexão com o servidor.": "⚠️ Could not reach the server.",
+  "⚠️ Login com Google ainda não configurado.": "⚠️ Google sign-in isn't set up yet.",
+  "⚠️ Nome: 3–16 letras, números ou _": "⚠️ Name: 3–16 letters, numbers or _",
+  "⚠️ Não consegui carregar o login do Google.": "⚠️ Couldn't load Google sign-in.",
+  "Desistir da partida?": "Resign the game?",
+  "Desistir da partida contra o computador?": "Resign the game against the computer?",
+  "Desistir da partida rankeada? Você perderá rating.": "Resign the ranked game? You will lose rating.",
+  "Sair da partida e voltar ao menu?": "Leave the game and go back to the menu?",
+  "Sair agora conta como DESISTÊNCIA da partida rankeada. Sair mesmo assim?": "Leaving now counts as RESIGNING the ranked game. Leave anyway?",
+  "Jogada inválida.": "Invalid move.",
+  "Movimento ilegal.": "Illegal move.",
+  "Partida encerrada.": "The game is over.",
+  "Você não tem essa carta.": "You don't have that card.",
+  "Alvo inválido para a carta.": "Invalid target for this card.",
+  "Em xeque você não pode comprar carta.": "You can't draw a card while in check.",
+  "Ação desconhecida.": "Unknown action.",
+  "Carta desconhecida.": "Unknown card.",
+  "🏳️ Desistência": "🏳️ Resignation",
+  "⏰ Deu o tempo!": "⏰ Time's up!",
+  "🤝 Empate": "🤝 Draw", "Empate": "Draw",
+  "Os jogadores acordaram o empate.": "The players agreed to a draw.",
+  "Afogamento — não há jogadas legais.": "Stalemate — no legal moves.",
+  // cartas: nome, descrição e dica
+  "Estilo Cavalo": "Knight Style", "Estilo Bispo": "Bishop Style",
+  "Estilo Torre": "Rook Style", "Estilo Dama": "Queen Style",
+  "Invocar Cavalo": "Summon Knight", "Invocar Bispo": "Summon Bishop",
+  "Invocar Torre": "Summon Rook", "Invocar Dama": "Summon Queen",
+  "Pedra Ancestral": "Ancient Rock", "Golpe à Distância": "Long-Range Strike",
+  "Mudança de Time": "Change of Sides", "Sacrifício": "Sacrifice",
+  "Bispo Atirador": "Sharpshooter Bishop", "Torre Bomba": "Bomb Rook",
+  "Seguro do Rei": "King's Insurance", "Mina Terrestre": "Land Mine",
+  "Armadura de Espinhos": "Thorn Armor",
+  "A peça escolhida ganha, para sempre, o movimento de cavalo além do seu próprio. Não vale para o rei.": "The chosen piece gains the knight's move on top of its own, permanently. Not for the king.",
+  "A peça escolhida ganha, para sempre, o movimento de bispo além do seu próprio. Não vale para o rei.": "The chosen piece gains the bishop's move on top of its own, permanently. Not for the king.",
+  "A peça escolhida ganha, para sempre, o movimento de torre além do seu próprio. Não vale para o rei.": "The chosen piece gains the rook's move on top of its own, permanently. Not for the king.",
+  "A peça escolhida ganha, para sempre, o movimento de dama além do seu próprio. Não vale para o rei.": "The chosen piece gains the queen's move on top of its own, permanently. Not for the king.",
+  "Invoca um cavalo numa casa vazia da sua primeira fileira.": "Summons a knight on an empty square of your back rank.",
+  "Invoca um bispo numa casa vazia da sua primeira fileira.": "Summons a bishop on an empty square of your back rank.",
+  "Invoca uma torre numa casa vazia da sua primeira fileira.": "Summons a rook on an empty square of your back rank.",
+  "Invoca uma dama numa casa vazia da sua primeira fileira.": "Summons a queen on an empty square of your back rank.",
+  "Coloca uma pedra permanente numa casa vazia. Ninguém pode ocupá-la ou atravessá-la.": "Places a permanent rock on an empty square. Nobody can stand on it or move through it.",
+  "Captura uma peça inimiga que esteja no raio de ataque de uma peça sua, sem mover ninguém. (Contra armadura, quebra só a armadura.)": "Captures an enemy piece that one of your pieces attacks, without moving anyone. (Against armor, it only breaks the armor.)",
+  "Uma peça inimiga no raio de ataque das suas peças troca de lado e passa a ser sua. Não vale para o rei.": "An enemy piece your pieces attack switches sides and becomes yours. Not for the king.",
+  "Sacrifica (remove do jogo) uma peça sua à sua escolha. O rei não pode ser sacrificado.": "Sacrifices (removes) one of your own pieces. The king can't be sacrificed.",
+  "Um bispo seu passa a capturar à distância: elimina o alvo sem sair do lugar. (Contra armadura, quebra só a armadura.)": "One of your bishops starts capturing at range: it removes the target without moving. (Against armor, it only breaks the armor.)",
+  "Uma torre sua vira bomba: quando capturar — ou FOR capturada — explode tudo em volta, e a explosão PODE matar reis! Ninguém pode causar essa explosão com o próprio rei no raio. Se ela puder capturar algo ao lado do rei inimigo, é xeque!": "One of your rooks becomes a bomb: when it captures — or IS captured — everything around it blows up, and the blast CAN kill kings! Nobody may set off that blast with their own king in range. If it can capture something next to the enemy king, that's check!",
+  "Teletransporta o seu rei para qualquer casa vazia do tabuleiro.": "Teleports your king to any empty square on the board.",
+  "Mina visível numa casa vazia: quem parar sobre ela explode com os vizinhos — e ela PODE explodir reis! Ninguém detona uma mina com o próprio rei no raio; rei no alcance de mina detonável pelo inimigo está em xeque.": "A visible mine on an empty square: whoever stops on it blows up along with its neighbours — and it CAN kill kings! Nobody sets off a mine with their own king in range; a king within reach of a mine the enemy can set off is in check.",
+  "A peça escolhida não pode ser capturada: quem tentar capturá-la é destruído e a armadura quebra. Golpe à Distância e Bispo Atirador quebram só a armadura — e uma Torre Bomba morta nos espinhos ainda explode! Não vale para o rei.": "The chosen piece can't be captured: whoever tries is destroyed and the armor breaks. Long-Range Strike and Sharpshooter Bishop only break the armor — and a Bomb Rook killed on the thorns still explodes! Not for the king.",
+  "Escolha a peça que vai ganhar o movimento de cavalo.": "Choose the piece that gains the knight's move.",
+  "Escolha a peça que vai ganhar o movimento de bispo.": "Choose the piece that gains the bishop's move.",
+  "Escolha a peça que vai ganhar o movimento de torre.": "Choose the piece that gains the rook's move.",
+  "Escolha a peça que vai ganhar o movimento de dama.": "Choose the piece that gains the queen's move.",
+  "Escolha uma casa vazia da sua primeira fileira.": "Choose an empty square on your back rank.",
+  "Escolha (ou arraste até) uma casa vazia para a pedra.": "Choose (or drag to) an empty square for the rock.",
+  "Escolha a peça inimiga para capturar à distância.": "Choose the enemy piece to capture at range.",
+  "Escolha a peça inimiga que vai trocar de time.": "Choose the enemy piece that switches sides.",
+  "Escolha a peça sua que será sacrificada.": "Choose which of your pieces to sacrifice.",
+  "Escolha o bispo que vai virar atirador.": "Choose the bishop that becomes a sharpshooter.",
+  "Escolha a torre que vai virar bomba.": "Choose the rook that becomes a bomb.",
+  "Escolha a casa para onde o rei vai se teletransportar.": "Choose the square your king teleports to.",
+  "Escolha uma casa vazia para a mina.": "Choose an empty square for the mine.",
+  "Escolha a peça que vai receber a armadura.": "Choose the piece that receives the armor."
+};
+
+// textos montados na hora (status, registro de lances, rótulos com números)
+const EN_PADROES = [
+  [/Vez das Brancas/g, "White to move"], [/Vez das Pretas/g, "Black to move"],
+  [/ — sua vez!/g, " — your turn!"], [/ — aguarde…/g, " — please wait…"],
+  [/⚠️ XEQUE!/g, "⚠️ CHECK!"],
+  [/Xeque-mate!/g, "Checkmate!"], [/Empate por afogamento\./g, "Stalemate."],
+  [/🤝 Empate acordado\./g, "🤝 Draw agreed."],
+  [/⏰ Tempo esgotado —/g, "⏰ Time out —"],
+  [/Brancas vencem a partida\./g, "White wins the game."], [/Pretas vencem a partida\./g, "Black wins the game."],
+  [/Brancas vencem\./g, "White wins."], [/Pretas vencem\./g, "Black wins."],
+  [/Brancas desistiram/g, "White resigned"], [/Pretas desistiram/g, "Black resigned"],
+  [/ desistiram —/g, " resigned —"],
+  [/ 🏆 Você venceu!/g, " 🏆 You won!"], [/ Você perdeu\./g, " You lost."],
+  [/Cartas — /g, "Cards — "], [/ \(você\)/g, " (you)"], [/ \(oponente\)/g, " (opponent)"],
+  [/Contra o computador — nível/g, "Versus the computer — level"],
+  [/ \(você joga de brancas\)/g, " (you play White)"],
+  [/Modo: mesmo computador/g, "Mode: same computer"],
+  [/🏅 Rankeada/g, "🏅 Ranked"],
+  [/^Sala /g, "Room "], [/ conectado/g, " connected"], [/ desconectado/g, " disconnected"],
+  [/Partida contra o computador — nível/g, "Game against the computer — level"],
+  [/Você joga de [Bb]rancas/g, "You play White"], [/Você joga de [Pp]retas/g, "You play Black"],
+  [/Partida iniciada!/g, "Game started!"], [/Partida encontrada/g, "Match found"],
+  [/🔎 Procurando oponente de/g, "🔎 Looking for an opponent at"],
+  [/Moedas insuficientes: custa/g, "Not enough coins: it costs"], [/🪙 e você tem/g, "🪙 and you have"],
+  [/Mão cheia: máximo de/g, "Hand full: at most"], [/ cartas\./g, " cards."],
+  [/⭐ Seu rating:/g, "⭐ Your rating:"],
+  // registro de lances
+  [/Carta: /g, "Card: "],
+  [/ganha o Estilo Cavalo/g, "gains Knight Style"], [/ganha o Estilo Bispo/g, "gains Bishop Style"],
+  [/ganha o Estilo Torre/g, "gains Rook Style"], [/ganha o Estilo Dama/g, "gains Queen Style"],
+  [/ invocado em /g, " summoned on "], [/ invocada em /g, " summoned on "],
+  [/pedra em /g, "rock on "], [/golpe à distância em /g, "long-range strike on "],
+  [/mina em /g, "mine on "],
+  [/ganha armadura de espinhos/g, "gains thorn armor"],
+  [/troca de time!/g, "switches sides!"], [/é sacrificado/g, "is sacrificed"],
+  [/vira atirador/g, "becomes a sharpshooter"], [/vira bomba/g, "becomes a bomb"],
+  [/Rei se teletransporta para/g, "King teleports to"],
+  [/ atira em /g, " shoots "], [/ morre nos espinhos de /g, " dies on the thorns of "],
+  [/\(armadura quebrada\)/g, "(armor broken)"], [/ capturado\)/g, " captured)"],
+  [/Roque curto/g, "Kingside castling"], [/Roque longo/g, "Queenside castling"],
+  [/🂠 Compra uma carta do monte \((\d+) restantes?\)/g, "🂠 Draws a card from the deck ($1 left)"],
+  [/ em ([a-h][1-8])/g, " on $1"],
+  [/ contra /g, " against "],
+  // nomes de peças, por último
+  [/\bPeão\b/g, "Pawn"], [/\bCavalo\b/g, "Knight"], [/\bBispo\b/g, "Bishop"],
+  [/\bTorre\b/g, "Rook"], [/\bDama\b/g, "Queen"], [/\bRei\b/g, "King"],
+  [/\bBrancas\b/g, "White"], [/\bPretas\b/g, "Black"],
+  [/\bbrancas\b/g, "White"], [/\bpretas\b/g, "Black"]
+];
+
+function tr(s) {
+  if (idioma !== "en" || s == null) return s;
+  const txt = String(s), chave = txt.trim();
+  if (!chave) return s;
+  if (EN[chave] !== undefined) return txt.replace(chave, EN[chave]);
+  let fora = txt;
+  for (const [re, por] of EN_PADROES) fora = fora.replace(re, por);
+  return fora;
+}
+
+// guarda o texto original de cada nó, para conseguir voltar ao português
+const TEXTO_PT = new WeakMap();
+function traduzirDOM(raiz) {
+  const base = raiz && raiz.nodeType === 1 ? raiz : document.body;
+  if (!base) return;
+  const it = document.createTreeWalker(base, NodeFilter.SHOW_TEXT, null);
+  const nos = [];
+  let n;
+  while ((n = it.nextNode())) nos.push(n);
+  for (const no of nos) {
+    const pai = no.parentNode;
+    if (!pai || pai.nodeName === "SCRIPT" || pai.nodeName === "STYLE") continue;
+    if (!TEXTO_PT.has(no)) TEXTO_PT.set(no, no.nodeValue);
+    const pt = TEXTO_PT.get(no);
+    const novo = idioma === "en" ? tr(pt) : pt;
+    if (no.nodeValue !== novo) no.nodeValue = novo;
+  }
+  const comAttr = base.querySelectorAll ? base.querySelectorAll("[title],[placeholder]") : [];
+  for (const el of comAttr) {
+    for (const a of ["title", "placeholder"]) {
+      const atual = el.getAttribute(a);
+      if (atual == null) continue;
+      const guarda = "pt" + a;
+      if (!el.dataset[guarda]) el.dataset[guarda] = atual;
+      const pt = el.dataset[guarda];
+      el.setAttribute(a, idioma === "en" ? tr(pt) : pt);
+    }
+  }
+}
+
+const REGRAS_PT_GUARDA = { html: null };
+function aplicarIdioma() {
+  document.documentElement.lang = idioma === "en" ? "en" : "pt-BR";
+  const regras = $("regras");
+  if (regras) {
+    if (REGRAS_PT_GUARDA.html === null) REGRAS_PT_GUARDA.html = regras.innerHTML;
+    regras.innerHTML = idioma === "en" ? REGRAS_EN : REGRAS_PT_GUARDA.html;
+  }
+  const bt = $("btnIdioma");
+  if (bt) bt.textContent = idioma === "en" ? "PT" : "EN";
+  traduzirDOM(document.body);
+  if (state) { try { render(); } catch (e) {} }
+}
+function trocarIdioma() {
+  idioma = idioma === "en" ? "pt" : "en";
+  try { localStorage.setItem("ct_idioma", idioma); } catch (e) {}
+  aplicarIdioma();
+}
+
+// as caixas de confirmação do navegador não passam pelo DOM
+const confirmarOriginal = window.confirm.bind(window);
+window.confirm = (msg) => confirmarOriginal(tr(msg));
+
+// tudo que for criado na tela depois (avisos, cartas, fim de partida) é traduzido na hora
+if (window.MutationObserver) {
+  new MutationObserver((muts) => {
+    if (idioma !== "en") return;
+    for (const m of muts) {
+      for (const no of m.addedNodes) {
+        if (no.nodeType === 1) traduzirDOM(no);
+        else if (no.nodeType === 3 && no.parentNode) traduzirDOM(no.parentNode);
+      }
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+}
+
 /* ---------- helpers ---------- */
 function pieceSvg(p) {
   if (p.t === "X") return '<svg class="psvg rocksvg"><use href="#p-rock"/></svg>';
@@ -3355,6 +3646,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("btnCopy").addEventListener("click", () => {
     navigator.clipboard && navigator.clipboard.writeText($("hostCode").textContent).then(() => toast("Código copiado!"));
   });
+  $("btnIdioma").addEventListener("click", trocarIdioma);
+  aplicarIdioma();
   $("btnSom").textContent = somLigado ? "🔊 Som" : "🔇 Som";
   $("btnSom").addEventListener("click", () => {
     somLigado = !somLigado;
