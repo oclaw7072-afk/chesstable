@@ -343,6 +343,11 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     return fs.createReadStream(path.join(__dirname, "public", "index.html")).pipe(res);
   }
+  // imagem de pré-visualização do link (Discord, WhatsApp, Twitter…)
+  if (p === "/og.png") {
+    res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" });
+    return fs.createReadStream(path.join(__dirname, "public", "og.png")).pipe(res);
+  }
   if (p === "/privacidade") {
     return page(res, "Política de Privacidade",
       "O chesstable é um jogo gratuito de xadrez com cartas.<br><br>" +
