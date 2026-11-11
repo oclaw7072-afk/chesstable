@@ -345,8 +345,13 @@ const server = http.createServer((req, res) => {
   }
   // imagem de pré-visualização do link (Discord, WhatsApp, Twitter…)
   if (p === "/og.png") {
+    // aceita og.png ou og_1.png: o upload pelo site do GitHub pode chegar com o sufixo
+    const arq = ["og.png", "og_1.png"]
+      .map((n) => path.join(__dirname, "public", n))
+      .find((f) => fs.existsSync(f));
+    if (!arq) { res.writeHead(404); return res.end("404"); }
     res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" });
-    return fs.createReadStream(path.join(__dirname, "public", "og.png")).pipe(res);
+    return fs.createReadStream(arq).pipe(res);
   }
   if (p === "/privacidade") {
     return page(res, "Política de Privacidade",
