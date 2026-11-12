@@ -2294,6 +2294,7 @@ function connectWS() {
     else if (m.t === "match") {
       searching = false; setQueueUI();
       mode = "matched"; myColor = m.cor; opponent = m.oponente; roomCode = ""; ratingNote = "";
+      marcar("rankeada");
       matchTC = m.tc || 0;
       clocks = m.clock ? { w: m.clock.w, b: m.clock.b } : null;
       clockSyncAt = Date.now();
@@ -2415,6 +2416,7 @@ function iniciarBot(nivel) {
   roomCode = "";
   $("botPicker").hidden = true;
   startGame();
+  marcar("bot" + nivel);
   toast("Partida contra o computador — nível " + nivel + ". Você joga de brancas.");
 }
 
@@ -2882,6 +2884,15 @@ if (window.MutationObserver) {
   }).observe(document.documentElement, { childList: true, subtree: true });
 }
 
+/* ---------- contador de uso (só números, nada pessoal) ---------- */
+function marcar(evento) {
+  try {
+    const corpo = JSON.stringify({ e: evento });
+    if (navigator.sendBeacon) navigator.sendBeacon("/api/stat", new Blob([corpo], { type: "application/json" }));
+    else fetch("/api/stat", { method: "POST", headers: { "Content-Type": "application/json" }, body: corpo, keepalive: true });
+  } catch (e) {}
+}
+
 /* ---------- helpers ---------- */
 function pieceSvg(p) {
   if (p.t === "X") return '<svg class="psvg rocksvg"><use href="#p-rock"/></svg>';
@@ -2968,6 +2979,7 @@ function wireConn() {
 }
 function hostGame() {
   if (typeof Peer === "undefined") { netFail("Biblioteca de rede não carregou. Verifique sua internet."); return; }
+  marcar("sala");
   roomCode = genCode();
   $("hostPanel").hidden = false;
   $("joinPanel").hidden = true;
@@ -2995,6 +3007,7 @@ function joinGame(code) {
   if (typeof Peer === "undefined") { netFail("Biblioteca de rede não carregou. Verifique sua internet."); return; }
   code = code.trim().toUpperCase();
   if (code.length < 4) { toast("Digite o código da sala."); return; }
+  marcar("entrou-sala");
   $("joinStatus").textContent = "Conectando…";
   peer = new Peer();
   peer.on("error", (e) => {
@@ -3058,6 +3071,8 @@ function doAction(a) {
   const res = applyAction(state, a);
   if (!res.ok) { toast(res.error || "Jogada inválida."); return false; }
   somDoLance(nLog);
+  if (state.log.length === 10) marcar("jogou10");     // passou de 10 lances: jogou de verdade
+  if (state.over) marcar("terminou");
   if (conn) conn.send({ type: "action", action: a });
   else if (mode === "matched") sendGame({ t: "action", action: a });
   clearSelection();
@@ -3637,8 +3652,8 @@ document.addEventListener("DOMContentLoaded", () => {
   for (const b of document.querySelectorAll("#botPicker .tcbtn")) {
     b.addEventListener("click", () => iniciarBot(parseInt(b.dataset.bot, 10)));
   }
-  $("btnLocal").addEventListener("click", () => { mode = "local"; myColor = null; roomCode = ""; startGame(); botNivel = 0; });
-  $("btnTreino").addEventListener("click", () => { mode = "local"; myColor = null; roomCode = ""; startGame(initialState("treino")); });
+  $("btnLocal").addEventListener("click", () => { mode = "local"; myColor = null; roomCode = ""; startGame(); botNivel = 0; marcar("local"); });
+  $("btnTreino").addEventListener("click", () => { mode = "local"; myColor = null; roomCode = ""; startGame(initialState("treino")); marcar("treino"); });
   $("btnHost").addEventListener("click", hostGame);
   $("btnShowJoin").addEventListener("click", () => { $("joinPanel").hidden = false; $("hostPanel").hidden = true; $("joinCode").focus(); });
   $("btnJoin").addEventListener("click", () => joinGame($("joinCode").value));
@@ -3646,6 +3661,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("btnCopy").addEventListener("click", () => {
     navigator.clipboard && navigator.clipboard.writeText($("hostCode").textContent).then(() => toast("Código copiado!"));
   });
+  marcar("visita");
   $("btnIdioma").addEventListener("click", trocarIdioma);
   aplicarIdioma();
   $("btnSom").textContent = somLigado ? "🔊 Som" : "🔇 Som";
