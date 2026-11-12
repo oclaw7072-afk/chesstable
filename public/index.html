@@ -2951,6 +2951,7 @@ function showMenu() {
 }
 function startGame(st) {
   state = st || initialState();
+  marcou10 = false; marcouFim = false;
   clearSelection();
   fxSeen = state.log.length;
   flipped = (myColor === "b");
@@ -3071,8 +3072,6 @@ function doAction(a) {
   const res = applyAction(state, a);
   if (!res.ok) { toast(res.error || "Jogada inválida."); return false; }
   somDoLance(nLog);
-  if (state.log.length === 10) marcar("jogou10");     // passou de 10 lances: jogou de verdade
-  if (state.over) marcar("terminou");
   if (conn) conn.send({ type: "action", action: a });
   else if (mode === "matched") sendGame({ t: "action", action: a });
   clearSelection();
@@ -3294,8 +3293,11 @@ function buildBoard() {
   }
 }
 
+let marcou10 = false, marcouFim = false;
 function render() {
   if (!state) return;
+  if (!marcou10 && state.log.length >= 10) { marcou10 = true; marcar("jogou10"); }
+  if (!marcouFim && state.over) { marcouFim = true; marcar("terminou"); }
   const board = $("board");
   if (!board.children.length || board._flipped !== flipped) { buildBoard(); board._flipped = flipped; }
 
