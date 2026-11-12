@@ -72,12 +72,12 @@ function chamarScript(corpo) {
   });
 }
 
-let db = { users: {}, sessions: {} };
+let db = { users: {}, sessions: {}, stats: {} };
 
 async function carregarDB() {
   if (usandoDrive) {
     const r = await chamarScript({ acao: "ler", chave: DB_KEY });
-    if (r && r.dados) db = { users: r.dados.users || {}, sessions: r.dados.sessions || {} };
+    if (r && r.dados) db = { users: r.dados.users || {}, sessions: r.dados.sessions || {}, stats: r.dados.stats || {} };
     else { try { db = JSON.parse(fs.readFileSync(DB_FILE, "utf8")); } catch (e) {} await gravarNoDrive(); }
     return "Google Drive (Apps Script)";
   }
@@ -91,7 +91,7 @@ async function carregarDB() {
   const r = await pool.query("SELECT dados FROM estado WHERE id = 1");
   if (r.rows[0] && r.rows[0].dados) {
     const d = r.rows[0].dados;
-    db = { users: d.users || {}, sessions: d.sessions || {} };
+    db = { users: d.users || {}, sessions: d.sessions || {}, stats: d.stats || {} };
   } else {
     // primeira vez: aproveita um db.json existente, se houver
     try { db = JSON.parse(fs.readFileSync(DB_FILE, "utf8")); } catch (e) {}
@@ -164,6 +164,20 @@ function save() {
     fs.renameSync(tmp, DB_FILE);
   }, usandoDrive ? 800 : 50);   // no Drive, espaça as gravações
 }
+/* ---------------- contador de uso ----------------
+   Só números somados por dia: nada de IP, nada que identifique uma pessoa. */
+const DIAS_GUARDADOS = 120;
+function diaDeHoje() { return new Date().toISOString().slice(0, 10); }
+function contar(evento) {
+  if (!db.stats) db.stats = {};
+  const dia = diaDeHoje();
+  if (!db.stats[dia]) db.stats[dia] = {};
+  db.stats[dia][evento] = (db.stats[dia][evento] || 0) + 1;
+  const dias = Object.keys(db.stats).sort();
+  while (dias.length > DIAS_GUARDADOS) delete db.stats[dias.shift()];
+  save();
+}
+
 const userKey = (nome) => nome.trim().toLowerCase();
 function pubUser(u) {
   return { nome: u.nome, rating: Math.round(u.rating), rd: Math.round(u.rd),
@@ -408,10 +422,47 @@ const server = http.createServer((req, res) => {
         db.users[nk] = { nome, email: info.email, gid, verificado: true,
           rating: 1200, rd: 350, partidas: 0, vitorias: 0, derrotas: 0, empates: 0, criado: Date.now() };
         save();
+        contar("conta");
         console.log("[conta google]", nome, info.email);
         json(res, 200, { ok: true, token: newSession(nome), usuario: pubUser(db.users[nk]) });
       });
     });
+  }
+
+  // o jogo avisa o que aconteceu (abriu, começou partida, jogou de verdade, terminou)
+  if (p === "/api/stat" && req.method === "POST") {
+    return readBody(req, (b) => {
+      const e = String(b.e || "");
+      if (/^[a-z0-9:_-]{1,32}$/.test(e)) contar(e);
+      res.writeHead(204); res.end();
+    });
+  }
+
+  if (p === "/stats") {
+    const dias = Object.keys(db.stats || {}).sort().reverse().slice(0, 21);
+    const chaves = [];
+    for (const d of dias) for (const k in db.stats[d]) if (chaves.indexOf(k) < 0) chaves.push(k);
+    chaves.sort();
+    const linhas = dias.map((d) => "<tr><td><b>" + d + "</b></td>" +
+      chaves.map((k) => "<td>" + (db.stats[d][k] || "·") + "</td>").join("") + "</tr>").join("");
+    const total = {};
+    for (const d of dias) for (const k in db.stats[d]) total[k] = (total[k] || 0) + db.stats[d][k];
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    return res.end("<!DOCTYPE html><html lang='pt-BR'><meta charset='utf-8'>" +
+      "<meta name='viewport' content='width=device-width,initial-scale=1'><title>chesstable — uso</title>" +
+      "<style>body{font-family:system-ui,sans-serif;background:#191622;color:#eceaf4;padding:18px}" +
+      "h1{color:#c9a84c;font-size:20px}table{border-collapse:collapse;font-size:14px;width:100%}" +
+      "th,td{border:1px solid #403b5e;padding:6px 9px;text-align:right}th{color:#a49fc0;font-weight:600}" +
+      "td:first-child,th:first-child{text-align:left}tr:nth-child(even){background:#221f35}" +
+      "a{color:#8b6ce8}.v{color:#a49fc0;font-size:13px;margin:10px 0 18px}</style>" +
+      "<h1>♞ chesstable — uso</h1>" +
+      "<div class='v'>Contas registradas: <b>" + Object.keys(db.users || {}).length + "</b> · " +
+      "últimos " + dias.length + " dias</div>" +
+      (chaves.length
+        ? "<table><tr><th>dia</th>" + chaves.map((k) => "<th>" + k + "</th>").join("") + "</tr>" + linhas +
+          "<tr><td><b>total</b></td>" + chaves.map((k) => "<td><b>" + (total[k] || 0) + "</b></td>").join("") + "</tr></table>"
+        : "<p>Ainda sem dados.</p>") +
+      "<p><a href='/'>← voltar ao jogo</a></p>");
   }
 
   if (p === "/api/config") return json(res, 200, { googleClientId: GOOGLE_CLIENT_ID });
