@@ -522,6 +522,7 @@ function cloneState(s) {
     mines: s.mines.map(m => ({ at: m.at.slice(), c: m.c })),
     fx: [],
     kingBlast: [],
+    oculto: s.oculto,
     over: s.over,
     lastAction: s.lastAction,
     moveNum: s.moveNum,
@@ -997,10 +998,27 @@ function canAfford(s, key) {
 }
 
 const HAND_LIMIT = 3;
+// Carta que este lado não tem direito de ver. A mão do adversário chega como
+// { "?": quantidade } e o monte como uma pilha de "?" — assim nenhum cliente
+// guarda em memória a mão do outro nem a ordem do monte.
+const CARTA_OCULTA = "?";
+function temOcultas(s, col) { return (s.cards[col][CARTA_OCULTA] || 0) > 0; }
 function handSize(s, col) {
   let n = 0;
-  for (const k in s.cards[col]) if (s.cards[col][k] > 0) n++;
+  for (const k in s.cards[col]) if (s.cards[col][k] > 0) n += (k === CARTA_OCULTA ? s.cards[col][k] : 1);
   return n;
+}
+// Visão de um jogador: ele vê a própria mão; a do adversário vira contagem e o
+// monte vira pilha anônima. É só isso que trafega na rede.
+function viewFor(s, col, marcarOculto) {
+  const v = cloneState(s);
+  if (!col) return v;
+  const op = col === "w" ? "b" : "w";
+  const n = handSize(s, op);
+  v.cards[op] = n > 0 ? { [CARTA_OCULTA]: n } : {};
+  v.deck = s.deck.map(() => CARTA_OCULTA);
+  if (marcarOculto !== false) v.oculto = true;
+  return v;
 }
 // Comprar do monte: grátis, gasta o turno; máx. 3 cartas na mão;
 // proibido em xeque (não resolve nada) e indisponível no modo treino.
@@ -1043,6 +1061,7 @@ const sqName = (r, c) => FILES[c] + (8 - r);
 function applyAction(s, a) {
   if (s.over) return { ok: false, error: "Partida encerrada." };
   const me = s.turn;
+  let comprada = null;
   s.fx = [];
   s.kingBlast = [];
   let logTxt = "";
@@ -1073,7 +1092,14 @@ function applyAction(s, a) {
   } else if (a.kind === "card") {
     const key = a.card;
     if (!CARD_INFO[key]) return { ok: false, error: "Carta desconhecida." };
-    if (!s.cards[me][key]) return { ok: false, error: "Você não tem essa carta." };
+    if (!s.cards[me][key]) {
+      // Visão censurada: a carta estava virada na mão do adversário. Ela acabou de
+      // ser revelada pela jogada, então troco uma carta oculta pela carta real.
+      if (!temOcultas(s, me)) return { ok: false, error: "Você não tem essa carta." };
+      s.cards[me][CARTA_OCULTA] -= 1;
+      if (s.cards[me][CARTA_OCULTA] <= 0) delete s.cards[me][CARTA_OCULTA];
+      s.cards[me][key] = 1;
+    }
     if (!canAfford(s, key)) return { ok: false, error: "Moedas insuficientes: custa " + CARD_COST[key] + " 🪙 e você tem " + s.coins[me] + "." };
     const tgts = cardTargets(s, key);
     if (!tgts.some((d) => d[0] === a.at[0] && d[1] === a.at[1])) return { ok: false, error: "Alvo inválido para a carta." };
@@ -1100,8 +1126,11 @@ function applyAction(s, a) {
     if (s.deck.length === 0) return { ok: false, error: "O monte acabou." };
     if (handSize(s, me) >= HAND_LIMIT) return { ok: false, error: "Mão cheia: máximo de " + HAND_LIMIT + " cartas." };
     if (inCheck(s, me)) return { ok: false, error: "Em xeque você não pode comprar carta." };
-    const drawn = s.deck.shift();
-    s.cards[me][drawn] = 1;
+    let drawn = s.deck.shift();
+    // numa visão censurada o monte é só "?": quem tem o estado real informa a carta
+    if (drawn === CARTA_OCULTA && a.card && CARD_KEYS.indexOf(a.card) >= 0) drawn = a.card;
+    comprada = drawn;
+    s.cards[me][drawn] = (s.cards[me][drawn] || 0) + 1;
     s.ep = null;
     logTxt = `🂠 Compra uma carta do monte (${s.deck.length} restante${s.deck.length === 1 ? "" : "s"})`;
   } else {
@@ -1117,7 +1146,9 @@ function applyAction(s, a) {
 
   s.turn = enemy(me);
   const oppChecked = inCheck(s, s.turn);
-  if (!playerHasAnyAction(s, s.turn)) {
+  // Num estado censurado não dá para cravar mate: o adversário pode ter uma carta
+  // escondida que salve. Quem decide é quem tem o estado real (servidor/anfitrião).
+  if (!playerHasAnyAction(s, s.turn) && !(s.oculto && temOcultas(s, s.turn))) {
     if (oppChecked) {
       s.over = { result: "mate", winner: me };
       s.log.push({ n: s.moveNum, c: me, txt: "Xeque-mate!" });
@@ -1128,7 +1159,7 @@ function applyAction(s, a) {
   } else if (oppChecked) {
     s.log[s.log.length - 1].txt += " +";
   }
-  return { ok: true, check: oppChecked };
+  return { ok: true, check: oppChecked, comprada: comprada };
 }
 
 if (typeof module !== "undefined" && module.exports) {
@@ -1699,6 +1730,7 @@ function iaClonar(s) {
     variant: s.variant,
     mines: nm,
     fx: [], kingBlast: [],
+    oculto: s.oculto,
     over: s.over,
     lastAction: s.lastAction,
     moveNum: s.moveNum,
@@ -2308,6 +2340,12 @@ function connectWS() {
       if (m.clock) { clocks = m.clock; clockSyncAt = Date.now(); }
       if (res.ok) { somDoLance(nLog); clearSelection(); render(); if (res.check && state.turn === myColor && !state.over) toast("Xeque!"); }
     }
+    else if (m.t === "comprei") {        // só eu fico sabendo qual carta saiu do monte
+      const nLog = state.log.length;
+      applyAction(state, { kind: "draw", card: m.card });
+      if (m.clock) { clocks = m.clock; clockSyncAt = Date.now(); }
+      somDoLance(nLog); clearSelection(); render();
+    }
     else if (m.t === "clock") { clocks = m.clock; clockSyncAt = Date.now(); renderClocks(); }
     else if (m.t === "invalido") { state = m.state; if (m.clock) { clocks = m.clock; clockSyncAt = Date.now(); } clearSelection(); render(); toast("Jogada rejeitada pelo servidor — tabuleiro sincronizado."); }
     else if (m.t === "empate-oferta") { showDrawOffer("matched"); }
@@ -2320,6 +2358,9 @@ function connectWS() {
         if (m.motivo === "empate-acordado") state.over = { result: "draw", winner: null };
         else if (m.motivo === "tempo") state.over = { result: "tempo", winner: m.sWhite === 1 ? "w" : "b" };
         else if (m.motivo === "desistencia" || m.motivo === "abandono") state.over = { result: "resign", winner: m.sWhite === 1 ? "w" : "b" };
+        // num estado censurado quem fecha mate e afogamento é o servidor
+        else if (m.motivo === "xeque-mate") encerrarRemoto({ result: "mate", winner: m.sWhite === 1 ? "w" : "b" });
+        else if (m.motivo === "afogamento") encerrarRemoto({ result: "stalemate", winner: null });
       }
       const r = m.cor === "w" ? m.ratings.w : m.ratings.b;
       ratingNote = "⭐ Seu rating: " + r.antes + " → " + r.depois;
@@ -2427,12 +2468,15 @@ function vezDoBot() {
 function jogarBot() {
   if (!vezDoBot() || botPensando) return;
   botPensando = true;
+  // o computador recebe a mesma visão que um adversário humano teria:
+  // sem a sua mão e sem a ordem do monte
   const nivel = botNivel, alvo = state, t0 = Date.now();
+  const visaoBot = viewFor(state, "b", false);
   if (nivel >= 4) {
     const st = $("status");
     if (st) st.textContent = "O computador está pensando…";
   }
-  pensarBot(alvo, nivel).then((a) => {
+  pensarBot(visaoBot, nivel).then((a) => {
     const atraso = Math.max(0, 420 - (Date.now() - t0));   // pausa mínima para não parecer instantâneo
     setTimeout(() => {
       try {
@@ -2997,7 +3041,7 @@ function hostGame() {
       mode = "host"; myColor = "w";
       wireConn();
       startGame();
-      conn.send({ type: "start", state: state, color: "b" });
+      conn.send({ type: "start", state: viewFor(state, "b"), color: "b" });
       connOn = true;
       renderStatus();
       toast("Oponente conectado! Você joga de Brancas.");
@@ -3036,14 +3080,31 @@ function onMsg(msg) {
     toast("Partida iniciada! Você joga de " + COLOR_PT[myColor] + ".");
   } else if (msg.type === "action") {
     const nLog = state.log.length;
-    const res = applyAction(state, msg.action);
-    if (!res.ok) { conn.send({ type: "sync-req" }); return; }
+    const acao = msg.action;
+    // o convidado não escolhe a carta que compra: o monte é do anfitrião
+    if (mode === "host" && acao && acao.kind === "draw") delete acao.card;
+    const res = applyAction(state, acao);
+    if (!res.ok) {
+      if (mode === "host") conn.send({ type: "sync", state: viewFor(state, "b") });
+      else conn.send({ type: "sync-req" });
+      return;
+    }
+    if (mode === "host" && res.comprada) conn.send({ type: "comprei", card: res.comprada });
     somDoLance(nLog);
     clearSelection();
     render();
+    if (mode === "host" && state.over) conn.send({ type: "fim", over: state.over });
     if (res.check && state.turn === myColor && !state.over) toast("Xeque!");
+  } else if (msg.type === "comprei") {     // o anfitrião diz qual carta eu comprei
+    const nLog = state.log.length;
+    applyAction(state, { kind: "draw", card: msg.card });
+    somDoLance(nLog); clearSelection(); render();
+  } else if (msg.type === "fim") {         // só o anfitrião enxerga tudo e decide o fim
+    if (state && !state.over && msg.over) { encerrarRemoto(msg.over); clearSelection(); render(); }
+  } else if (msg.type === "restart-req") {
+    if (mode === "host") restart();
   } else if (msg.type === "sync-req") {
-    conn.send({ type: "sync", state: state });
+    if (mode === "host") conn.send({ type: "sync", state: viewFor(state, "b") });
   } else if (msg.type === "sync") {
     state = msg.state;
     clearSelection();
@@ -3068,6 +3129,14 @@ function onMsg(msg) {
   }
 }
 function doAction(a) {
+  // O monte não fica neste cliente quando a partida é em rede: a compra é pedida
+  // a quem tem o estado real (servidor na rankeada, anfitrião na sala) e só é
+  // aplicada aqui quando a resposta diz qual carta saiu.
+  if (a.kind === "draw" && (mode === "matched" || mode === "guest")) {
+    if (mode === "matched") sendGame({ t: "action", action: { kind: "draw" } });
+    else if (conn) conn.send({ type: "action", action: { kind: "draw" } });
+    return true;
+  }
   const nLog = state.log.length;
   const res = applyAction(state, a);
   if (!res.ok) { toast(res.error || "Jogada inválida."); return false; }
@@ -3469,6 +3538,7 @@ function renderHands() {
 function renderHand(el, col, faceUp) {
   const cards = state.cards[col];
   const held = CARD_KEYS.filter(k => cards[k] > 0);
+  const naMao = handSize(state, col);   // conta também as cartas ocultas ("?")
   const mine = mode === "local" ? true : col === myColor;
   const limit = state.variant === "treino" ? held.length : HAND_LIMIT;
   el.innerHTML = "";
@@ -3476,7 +3546,7 @@ function renderHand(el, col, faceUp) {
   label.className = "handlabel";
   let who = COLOR_PT[col];
   if (mode !== "local") who += col === myColor ? " (você)" : (mode === "matched" && opponent ? " — " + opponent.nome : " (oponente)");
-  label.innerHTML = "Cartas — " + who + " · " + held.length + "/" + limit +
+  label.innerHTML = "Cartas — " + who + " · " + naMao + "/" + limit +
     ' · <span class="coins">🪙 ' + coinsTxt(col) + "</span>" +
     (mode === "matched" && clocks ? ' <span class="clock" id="clock-' + col + '"></span>' : "");
   el.appendChild(label);
@@ -3505,7 +3575,7 @@ function renderHand(el, col, faceUp) {
       slots.appendChild(card);
     }
   } else {
-    for (let i = 0; i < held.length; i++) {
+    for (let i = 0; i < naMao; i++) {
       const back = document.createElement("div");
       back.className = "card9 facedown";
       back.title = mode === "local" ? "Carta do outro jogador (virada)" : "Carta secreta do oponente";
@@ -3513,7 +3583,7 @@ function renderHand(el, col, faceUp) {
       slots.appendChild(back);
     }
   }
-  for (let i = held.length; i < limit; i++) {
+  for (let i = (faceUp ? held.length : naMao); i < limit; i++) {
     const emptySlot = document.createElement("div");
     emptySlot.className = "slotempty";
     emptySlot.title = "Espaço vazio";
@@ -3538,6 +3608,13 @@ function tryDraw() {
   doAction({ kind: "draw" });
 }
 
+// Fecha a partida com o veredito de quem tem o estado real (servidor ou anfitrião).
+function encerrarRemoto(over) {
+  if (!state || state.over || !over) return;
+  state.over = over;
+  if (over.result === "mate") state.log.push({ n: state.moveNum, c: over.winner, txt: "Xeque-mate!" });
+  else if (over.result === "stalemate") state.log.push({ n: state.moveNum, c: enemy(state.turn), txt: "Empate por afogamento." });
+}
 function overText(over) {
   if (over.result === "mate") return "Xeque-mate! " + COLOR_PT[over.winner] + " vencem.";
   if (over.result === "resign") return "🏳️ " + COLOR_PT[enemy(over.winner)] + " desistiram — " + COLOR_PT[over.winner] + " vencem.";
@@ -3641,10 +3718,15 @@ function restart() {
     renderAccount();
     return;
   }
+  if (mode === "guest") {   // quem cria o monte é o anfitrião
+    if (conn) conn.send({ type: "restart-req" });
+    toast("Pedido de nova partida enviado ao anfitrião.");
+    return;
+  }
   const st = initialState(state && state.variant === "treino" ? "treino" : undefined);
   clearSelection();
   $("overlay").hidden = true;
-  if (conn) conn.send({ type: "restart", state: st });
+  if (conn) conn.send({ type: "restart", state: viewFor(st, "b") });
   startGame(st);
 }
 
