@@ -558,8 +558,10 @@ function criaJogo(a, b, tc) {
   online.get(wn).gameId = id;
   online.get(bn).gameId = id;
   const uw = pubUser(db.users[userKey(wn)]), ub = pubUser(db.users[userKey(bn)]);
-  wsSend(online.get(wn).sock, { t: "match", state, cor: "w", oponente: ub, tc, clock: g.clock });
-  wsSend(online.get(bn).sock, { t: "match", state, cor: "b", oponente: uw, tc, clock: g.clock });
+  // cada lado recebe só a SUA visão: a mão do adversário vai como contagem e o
+  // monte não vai — assim nem abrindo o console dá para ver a mão do outro.
+  wsSend(online.get(wn).sock, { t: "match", state: E.viewFor(state, "w"), cor: "w", oponente: ub, tc, clock: g.clock });
+  wsSend(online.get(bn).sock, { t: "match", state: E.viewFor(state, "b"), cor: "b", oponente: uw, tc, clock: g.clock });
   armaRelogio(g);
   console.log("[partida " + tc + "s]", wn, "(brancas) x", bn, "(pretas)");
 }
@@ -634,16 +636,20 @@ server.on("upgrade", (req, sock) => {
     const opSock = online.get(opNome) && online.get(opNome).sock;
 
     if (m.t === "action") {
-      if (g.state.turn !== minhaCor) return wsSend(sock, { t: "invalido", state: g.state, clock: g.clock });
+      if (g.state.turn !== minhaCor) return wsSend(sock, { t: "invalido", state: E.viewFor(g.state, minhaCor), clock: g.clock });
+      // o cliente nunca escolhe a carta que compra: o monte é do servidor
+      if (m.action && m.action.kind === "draw") delete m.action.card;
       // desconta o tempo gasto no lance
       const agora = Date.now();
       g.clock[minhaCor] -= (agora - g.lastTick);
       if (g.clock[minhaCor] <= 0) { g.clock[minhaCor] = 0; return fimDeJogo(g, minhaCor === "w" ? 0 : 1, "tempo"); }
       const r = E.applyAction(g.state, m.action);
-      if (!r.ok) { g.lastTick = agora; armaRelogio(g); return wsSend(sock, { t: "invalido", state: g.state, clock: g.clock }); }
+      if (!r.ok) { g.lastTick = agora; armaRelogio(g); return wsSend(sock, { t: "invalido", state: E.viewFor(g.state, minhaCor), clock: g.clock }); }
       g.lastTick = agora;
+      // o adversário só fica sabendo QUE comprou, nunca O QUE comprou
       wsSend(opSock, { t: "action", action: m.action, clock: g.clock });
-      wsSend(sock, { t: "clock", clock: g.clock });
+      if (r.comprada) wsSend(sock, { t: "comprei", card: r.comprada, clock: g.clock });
+      else wsSend(sock, { t: "clock", clock: g.clock });
       if (g.state.over) {
         const ov = g.state.over;
         fimDeJogo(g, ov.result === "mate" ? (ov.winner === "w" ? 1 : 0) : 0.5,
