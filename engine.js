@@ -108,6 +108,7 @@ function cloneState(s) {
     mines: s.mines.map(m => ({ at: m.at.slice(), c: m.c })),
     fx: [],
     kingBlast: [],
+    oculto: s.oculto,
     over: s.over,
     lastAction: s.lastAction,
     moveNum: s.moveNum,
@@ -440,7 +441,9 @@ function execMove(s, m, promoPiece) {
   }
   s.board[tr][tc] = p;
   s.board[r][c] = null;
-  if (m.promo || (p.t === "P" && (tr === 0 || tr === 7))) {
+  // promove só na oitava fileira DO ADVERSÁRIO: um peão com estilo que volte
+  // à própria primeira fileira não vira peça nova
+  if (m.promo || (p.t === "P" && tr === (p.c === "w" ? 0 : 7))) {
     const np = { t: promoPiece || "Q", c: p.c };
     if (p.st) np.st = p.st;
     if (p.ar) np.ar = p.ar;
@@ -581,10 +584,27 @@ function canAfford(s, key) {
 }
 
 const HAND_LIMIT = 3;
+// Carta que este lado não tem direito de ver. A mão do adversário chega como
+// { "?": quantidade } e o monte como uma pilha de "?" — assim nenhum cliente
+// guarda em memória a mão do outro nem a ordem do monte.
+const CARTA_OCULTA = "?";
+function temOcultas(s, col) { return (s.cards[col][CARTA_OCULTA] || 0) > 0; }
 function handSize(s, col) {
   let n = 0;
-  for (const k in s.cards[col]) if (s.cards[col][k] > 0) n++;
+  for (const k in s.cards[col]) if (s.cards[col][k] > 0) n += (k === CARTA_OCULTA ? s.cards[col][k] : 1);
   return n;
+}
+// Visão de um jogador: ele vê a própria mão; a do adversário vira contagem e o
+// monte vira pilha anônima. É só isso que trafega na rede.
+function viewFor(s, col, marcarOculto) {
+  const v = cloneState(s);
+  if (!col) return v;
+  const op = col === "w" ? "b" : "w";
+  const n = handSize(s, op);
+  v.cards[op] = n > 0 ? { [CARTA_OCULTA]: n } : {};
+  v.deck = s.deck.map(() => CARTA_OCULTA);
+  if (marcarOculto !== false) v.oculto = true;
+  return v;
 }
 // Comprar do monte: grátis, gasta o turno; máx. 3 cartas na mão;
 // proibido em xeque (não resolve nada) e indisponível no modo treino.
@@ -627,6 +647,7 @@ const sqName = (r, c) => FILES[c] + (8 - r);
 function applyAction(s, a) {
   if (s.over) return { ok: false, error: "Partida encerrada." };
   const me = s.turn;
+  let comprada = null;
   s.fx = [];
   s.kingBlast = [];
   let logTxt = "";
@@ -657,7 +678,14 @@ function applyAction(s, a) {
   } else if (a.kind === "card") {
     const key = a.card;
     if (!CARD_INFO[key]) return { ok: false, error: "Carta desconhecida." };
-    if (!s.cards[me][key]) return { ok: false, error: "Você não tem essa carta." };
+    if (!s.cards[me][key]) {
+      // Visão censurada: a carta estava virada na mão do adversário. Ela acabou de
+      // ser revelada pela jogada, então troco uma carta oculta pela carta real.
+      if (!temOcultas(s, me)) return { ok: false, error: "Você não tem essa carta." };
+      s.cards[me][CARTA_OCULTA] -= 1;
+      if (s.cards[me][CARTA_OCULTA] <= 0) delete s.cards[me][CARTA_OCULTA];
+      s.cards[me][key] = 1;
+    }
     if (!canAfford(s, key)) return { ok: false, error: "Moedas insuficientes: custa " + CARD_COST[key] + " 🪙 e você tem " + s.coins[me] + "." };
     const tgts = cardTargets(s, key);
     if (!tgts.some((d) => d[0] === a.at[0] && d[1] === a.at[1])) return { ok: false, error: "Alvo inválido para a carta." };
@@ -684,8 +712,11 @@ function applyAction(s, a) {
     if (s.deck.length === 0) return { ok: false, error: "O monte acabou." };
     if (handSize(s, me) >= HAND_LIMIT) return { ok: false, error: "Mão cheia: máximo de " + HAND_LIMIT + " cartas." };
     if (inCheck(s, me)) return { ok: false, error: "Em xeque você não pode comprar carta." };
-    const drawn = s.deck.shift();
-    s.cards[me][drawn] = 1;
+    let drawn = s.deck.shift();
+    // numa visão censurada o monte é só "?": quem tem o estado real informa a carta
+    if (drawn === CARTA_OCULTA && a.card && CARD_KEYS.indexOf(a.card) >= 0) drawn = a.card;
+    comprada = drawn;
+    s.cards[me][drawn] = (s.cards[me][drawn] || 0) + 1;
     s.ep = null;
     logTxt = `🂠 Compra uma carta do monte (${s.deck.length} restante${s.deck.length === 1 ? "" : "s"})`;
   } else {
@@ -701,7 +732,9 @@ function applyAction(s, a) {
 
   s.turn = enemy(me);
   const oppChecked = inCheck(s, s.turn);
-  if (!playerHasAnyAction(s, s.turn)) {
+  // Num estado censurado não dá para cravar mate: o adversário pode ter uma carta
+  // escondida que salve. Quem decide é quem tem o estado real (servidor/anfitrião).
+  if (!playerHasAnyAction(s, s.turn) && !(s.oculto && temOcultas(s, s.turn))) {
     if (oppChecked) {
       s.over = { result: "mate", winner: me };
       s.log.push({ n: s.moveNum, c: me, txt: "Xeque-mate!" });
@@ -712,13 +745,13 @@ function applyAction(s, a) {
   } else if (oppChecked) {
     s.log[s.log.length - 1].txt += " +";
   }
-  return { ok: true, check: oppChecked };
+  return { ok: true, check: oppChecked, comprada: comprada };
 }
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     CARD_INFO, CARD_KEYS, CARD_COST, STYLE_OF, SUMMON_OF, canAfford, canDraw, handSize, HAND_LIMIT,
-    initialState, cloneState, inCheck, attacksSquare,
+    initialState, cloneState, viewFor, CARTA_OCULTA, temOcultas, inCheck, attacksSquare,
     legalMovesFor, cardTargets, cardTargetsRaw, applyAction,
     hasLegalBoardMove, playerHasAnyAction, sqName, PIECE_PT,
     isRock, isPiece, mineIdx, canLandOn, hasEffect
